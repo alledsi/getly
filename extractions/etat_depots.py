@@ -98,6 +98,8 @@ _BASE_SQL = """
             c.NO_COMPTE                                              AS NUMERO_COMPTE,
             c.CODE_TYPE_CPT                                          AS CODE_TYPE_COMPTE,
             c.MATRICULE_CLIENT                                       AS MATRICULE_CLIENT,
+            cl.RAISON_SOCIALE_CLIENT                                 AS RAISON_SOCIALE_CLIENT,
+            cl.PRENOM_CLIENT                                         AS PRENOM_CLIENT,
             CASE WHEN (NVL(sb.solde_cloture, 0) + NVL(mv.mvt_net, 0)) < 0
                  THEN ABS(NVL(sb.solde_cloture, 0) + NVL(mv.mvt_net, 0))
                  ELSE 0
@@ -112,6 +114,7 @@ _BASE_SQL = """
         JOIN BUREAU b          ON b.CODE_BUREAU = c.CODE_BUREAU
         JOIN REGION r          ON r.CODE_REGION = b.CODE_REGION
         LEFT JOIN MUTUELLE mut ON mut.CODE_MUTUELLE = r.CODE_MUTUELLE
+        LEFT JOIN CLIENT cl    ON cl.MATRICULE_CLIENT = c.MATRICULE_CLIENT
         LEFT JOIN solde_base sb ON sb.no_compte = c.NO_COMPTE
         LEFT JOIN mouvements  mv ON mv.no_compte = c.NO_COMPTE
         WHERE c.COMPTE_GENERAL LIKE '25%'
@@ -134,6 +137,8 @@ _COLONNES_FINALES = [
     "NUMERO_COMPTE",
     "CODE_TYPE_COMPTE",
     "MATRICULE_CLIENT",
+    "RAISON_SOCIALE_CLIENT",
+    "PRENOM_CLIENT",
     "SLD_DEBITEUR",
     "SLD_CREDITEUR",
     "DATE_ARRETE",
@@ -152,6 +157,35 @@ def get_derniere_date_arrete() -> Optional[dt.date]:
     if isinstance(valeur, dt.datetime):
         return valeur.date()
     return valeur
+
+
+def get_valeurs_compte_general() -> list[str]:
+    """Comptes généraux distincts parmi les comptes de dépôts (compte général commençant par '25')."""
+    df = fetch_df(
+        "SELECT DISTINCT COMPTE_GENERAL FROM COMPTE "
+        "WHERE COMPTE_GENERAL LIKE '25%' ORDER BY COMPTE_GENERAL"
+    )
+    return df["COMPTE_GENERAL"].dropna().tolist()
+
+
+def get_valeurs_code_type_compte() -> list[str]:
+    """Codes type de compte distincts parmi les comptes de dépôts."""
+    df = fetch_df(
+        "SELECT DISTINCT CODE_TYPE_CPT FROM COMPTE "
+        "WHERE COMPTE_GENERAL LIKE '25%' AND CODE_TYPE_CPT IS NOT NULL "
+        "ORDER BY CODE_TYPE_CPT"
+    )
+    return df["CODE_TYPE_CPT"].dropna().tolist()
+
+
+def get_valeurs_status_compte() -> list[str]:
+    """Statuts de compte distincts parmi les comptes de dépôts."""
+    df = fetch_df(
+        "SELECT DISTINCT STATUS_COMPTE FROM COMPTE "
+        "WHERE COMPTE_GENERAL LIKE '25%' AND STATUS_COMPTE IS NOT NULL "
+        "ORDER BY STATUS_COMPTE"
+    )
+    return df["STATUS_COMPTE"].dropna().tolist()
 
 
 def get_etat_depots(filters: EtatDepotsFilters) -> pd.DataFrame:
@@ -228,6 +262,36 @@ def _derniere_date_arrete_cached() -> Optional[dt.date]:
     return get_derniere_date_arrete()
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _valeurs_compte_general_cached() -> list[str]:
+    return get_valeurs_compte_general()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _valeurs_code_type_compte_cached() -> list[str]:
+    return get_valeurs_code_type_compte()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _valeurs_status_compte_cached() -> list[str]:
+    return get_valeurs_status_compte()
+
+
+def _select_valeur(
+    label: str,
+    valeurs: list[str],
+    placeholder: str,
+    key: str,
+    max_chars: Optional[int] = None,
+) -> str:
+    """Menu déroulant simple (sans libellé) à partir d'une liste de valeurs
+    distinctes. Retombe sur un champ texte libre si la liste est vide."""
+    if not valeurs:
+        return st.text_input(label, max_chars=max_chars, key=f"{key}_txt") or ""
+    choix = st.selectbox(label, options=valeurs, index=None, placeholder=placeholder, key=key)
+    return choix or ""
+
+
 LIBELLES_COLONNES = {
     "CODE_MUTUELLE": "Code mutuelle",
     "NOM_MUTUELLE": "Mutuelle",
@@ -239,6 +303,8 @@ LIBELLES_COLONNES = {
     "NUMERO_COMPTE": "N° compte",
     "CODE_TYPE_COMPTE": "Code type compte",
     "MATRICULE_CLIENT": "Matricule client",
+    "RAISON_SOCIALE_CLIENT": "Raison sociale",
+    "PRENOM_CLIENT": "Prénom client",
     "SLD_DEBITEUR": "Solde débiteur",
     "SLD_CREDITEUR": "Solde créditeur",
     "DATE_ARRETE": "Date arrêté",
@@ -270,6 +336,21 @@ class EtatDepotsExtraction(Extraction):
                 "(vérifie que le fichier .env est bien configuré et que le "
                 "serveur a accès à la base)."
             )
+
+        try:
+            valeurs_compte_general = _valeurs_compte_general_cached()
+        except Exception:  # noqa: BLE001
+            valeurs_compte_general = []
+
+        try:
+            valeurs_code_type_compte = _valeurs_code_type_compte_cached()
+        except Exception:  # noqa: BLE001
+            valeurs_code_type_compte = []
+
+        try:
+            valeurs_status_compte = _valeurs_status_compte_cached()
+        except Exception:  # noqa: BLE001
+            valeurs_status_compte = []
 
         try:
             ref_localisation_df = referentiel_localisation_cached()
@@ -313,12 +394,18 @@ class EtatDepotsExtraction(Extraction):
             c1, c2, c3 = st.columns(3)
             with c1:
                 matricule_client = st.text_input("Matricule client", max_chars=8)
-                compte_general = st.text_input("Compte général", max_chars=10)
+                compte_general = _select_valeur(
+                    "Compte général", valeurs_compte_general, "Tous", "compte_general", max_chars=10
+                )
             with c2:
                 no_compte = st.text_input("N° compte", max_chars=12)
-                code_type_compte = st.text_input("Code type compte", max_chars=3)
+                code_type_compte = _select_valeur(
+                    "Code type compte", valeurs_code_type_compte, "Tous", "code_type_compte", max_chars=3
+                )
             with c3:
-                status_compte = st.text_input("Statut compte", max_chars=1)
+                status_compte = _select_valeur(
+                    "Statut compte", valeurs_status_compte, "Tous", "status_compte", max_chars=1
+                )
                 exclure_soldes_nuls = st.checkbox("Exclure les comptes à solde nul")
 
             st.caption("Localisation (Mutuelle → Agence → Bureau)")
