@@ -12,9 +12,11 @@ from typing import Optional
 
 from extractions.base import Extraction
 from extractions.journal_ecritures import JournalEcrituresExtraction
+from extractions.etat_depots import EtatDepotsExtraction
 
 EXTRACTIONS: list[Extraction] = [
     JournalEcrituresExtraction(),
+    EtatDepotsExtraction(),
     # Ajoute ici les futures extractions, ex. :
     # BalanceComptableExtraction(),
     # GrandLivreExtraction(),

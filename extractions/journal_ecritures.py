@@ -25,6 +25,7 @@ import streamlit as st
 
 from db import fetch_df
 from extractions.base import Extraction
+from extractions.reference_data import referentiel_localisation_cached, render_localisation_cascade
 
 # ---------------------------------------------------------------------------
 # Filtres du formulaire
@@ -124,25 +125,6 @@ def get_operations() -> pd.DataFrame:
     return fetch_df(sql)
 
 
-def get_referentiel_localisation() -> pd.DataFrame:
-    """
-    Bureaux avec leur agence et leur mutuelle (hiérarchie
-    Mutuelle -> Agence -> Bureau), pour construire les menus déroulants
-    en cascade du formulaire.
-    """
-    sql = """
-        SELECT
-            b.CODE_BUREAU, b.LIBELLE_BUREAU,
-            r.CODE_REGION, r.LIB_REGION,
-            m.CODE_MUTUELLE, m.NOM_MUTUELLE
-        FROM BUREAU b
-        LEFT JOIN REGION r   ON r.CODE_REGION = b.CODE_REGION
-        LEFT JOIN MUTUELLE m ON m.CODE_MUTUELLE = r.CODE_MUTUELLE
-        ORDER BY m.NOM_MUTUELLE, r.LIB_REGION, b.LIBELLE_BUREAU
-    """
-    return fetch_df(sql)
-
-
 def get_journal(filters: JournalFilters) -> pd.DataFrame:
     """
     Construit et exécute la requête du journal des écritures selon les
@@ -235,45 +217,6 @@ def _liste_operations_cached() -> pd.DataFrame:
     return get_operations()
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def _referentiel_localisation_cached() -> pd.DataFrame:
-    return get_referentiel_localisation()
-
-
-def _select_code_libelle(
-    label: str,
-    df: pd.DataFrame,
-    code_col: str,
-    libelle_col: str,
-    placeholder: str,
-    key: str,
-    max_chars: Optional[int] = None,
-    allow_text_fallback: bool = True,
-) -> str:
-    """
-    Menu déroulant "CODE — Libellé" construit à partir d'un DataFrame de
-    référence (éventuellement déjà filtré par le choix précédent dans une
-    cascade). Retourne le code sélectionné (chaîne vide si aucun choix).
-
-    - Si `df` est vide ET `allow_text_fallback` est vrai (liste de
-      référence indisponible), retombe sur un champ texte libre.
-    - Si `df` est vide et `allow_text_fallback` est faux (cas d'une
-      cascade dont le filtre parent ne laisse aucun résultat), affiche un
-      menu désactivé plutôt qu'un champ texte trompeur.
-    """
-    if df.empty:
-        if allow_text_fallback:
-            return st.text_input(label, max_chars=max_chars, key=f"{key}_txt") or ""
-        st.selectbox(
-            label, options=[], placeholder="Aucun résultat", disabled=True, key=f"{key}_vide"
-        )
-        return ""
-
-    options = [f"{getattr(row, code_col)} — {getattr(row, libelle_col)}" for row in df.itertuples()]
-    choix = st.selectbox(label, options=options, index=None, placeholder=placeholder, key=key)
-    return choix.split(" — ")[0] if choix else ""
-
-
 LIBELLES_COLONNES = {
     "DATE_ECRITURE": "Date écriture",
     "DATE_VALEUR": "Date valeur",
@@ -327,7 +270,7 @@ class JournalEcrituresExtraction(Extraction):
             )
 
         try:
-            ref_localisation_df = _referentiel_localisation_cached()
+            ref_localisation_df = referentiel_localisation_cached()
         except Exception:  # noqa: BLE001
             ref_localisation_df = pd.DataFrame(
                 columns=[
@@ -341,8 +284,6 @@ class JournalEcrituresExtraction(Extraction):
                 "depuis la base. Tu peux saisir les codes manuellement dans "
                 "les filtres avancés."
             )
-
-        localisation_indisponible = ref_localisation_df.empty
 
         st.subheader("Critères de recherche")
         col1, col2, col3 = st.columns(3)
@@ -391,69 +332,9 @@ class JournalEcrituresExtraction(Extraction):
                 sens_ecriture = choix_sens.split(" — ")[0] if choix_sens else ""
 
             st.caption("Localisation (Mutuelle → Agence → Bureau)")
-            c4, c5, c6 = st.columns(3)
-
-            with c4:
-                mutuelles_df = (
-                    ref_localisation_df[["CODE_MUTUELLE", "NOM_MUTUELLE"]]
-                    .dropna()
-                    .drop_duplicates()
-                    .sort_values("NOM_MUTUELLE")
-                )
-                code_mutuelle = _select_code_libelle(
-                    "Mutuelle", mutuelles_df, "CODE_MUTUELLE", "NOM_MUTUELLE",
-                    "Toutes", "code_mutuelle",
-                    allow_text_fallback=localisation_indisponible,
-                )
-
-            # Réinitialise les choix dépendants quand la mutuelle change
-            if code_mutuelle != st.session_state.get("_last_code_mutuelle"):
-                st.session_state.pop("code_agence", None)
-                st.session_state.pop("code_bureau", None)
-                st.session_state["_last_code_mutuelle"] = code_mutuelle
-
-            perimetre_mutuelle = (
-                ref_localisation_df
-                if not code_mutuelle
-                else ref_localisation_df[ref_localisation_df["CODE_MUTUELLE"] == code_mutuelle]
+            code_mutuelle, code_agence, code_bureau = render_localisation_cascade(
+                ref_localisation_df, key_prefix="journal_"
             )
-
-            with c5:
-                agences_df = (
-                    perimetre_mutuelle[["CODE_REGION", "LIB_REGION"]]
-                    .dropna()
-                    .drop_duplicates()
-                    .sort_values("LIB_REGION")
-                )
-                code_agence = _select_code_libelle(
-                    "Agence", agences_df, "CODE_REGION", "LIB_REGION",
-                    "Toutes", "code_agence",
-                    allow_text_fallback=localisation_indisponible,
-                )
-
-            # Réinitialise le bureau quand l'agence change
-            if code_agence != st.session_state.get("_last_code_agence"):
-                st.session_state.pop("code_bureau", None)
-                st.session_state["_last_code_agence"] = code_agence
-
-            perimetre_agence = (
-                perimetre_mutuelle
-                if not code_agence
-                else perimetre_mutuelle[perimetre_mutuelle["CODE_REGION"] == code_agence]
-            )
-
-            with c6:
-                bureaux_df = (
-                    perimetre_agence[["CODE_BUREAU", "LIBELLE_BUREAU"]]
-                    .dropna()
-                    .drop_duplicates()
-                    .sort_values("LIBELLE_BUREAU")
-                )
-                code_bureau = _select_code_libelle(
-                    "Bureau", bureaux_df, "CODE_BUREAU", "LIBELLE_BUREAU",
-                    "Tous", "code_bureau",
-                    allow_text_fallback=localisation_indisponible,
-                )
 
         submitted = st.button("🔍 Générer le journal", width="stretch", type="primary")
 

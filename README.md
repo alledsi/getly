@@ -7,9 +7,15 @@ nouvelles facilement.
 
 **Extractions disponibles aujourd'hui :**
 
-- 📒 **Journal des écritures** — formulaire (code opération, date début,
-  date fin obligatoires ; matricule client, n° compte, bureau, agence,
-  mutuelle facultatifs) → tableau du journal des écritures → export Excel.
+- 📒 **Journal des écritures** — un ou plusieurs codes opération, date
+  début, date fin obligatoires ; matricule client, n° compte, sens
+  écriture, et localisation hiérarchique (mutuelle → agence → bureau)
+  facultatifs → tableau du journal → export Excel.
+- 🏦 **État des dépôts** — date d'arrêté obligatoire (dernier solde
+  clôturé + mouvements jusqu'à cette date) ; matricule client, compte
+  général, n° compte, code type compte, statut compte, exclusion des
+  soldes nuls, et localisation hiérarchique facultatifs → tableau des
+  soldes débiteurs/créditeurs par compte → export Excel.
 
 ## ⚠️ Important : réseau
 
@@ -50,15 +56,14 @@ L'application s'ouvre dans le navigateur (par défaut http://localhost:8501).
 
 ## Utilisation
 
-1. Dans la barre latérale, choisis le **type d'extraction** (pour
-   l'instant : Journal des écritures).
-2. Clique sur **"Tester la connexion à la base"** pour vérifier que
-   l'application arrive à joindre Oracle.
-3. Renseigne les champs obligatoires du formulaire, et facultativement
-   les filtres avancés.
-4. Clique sur le bouton de génération : le tableau s'affiche avec les
+1. Dans la barre latérale, choisis le **type d'extraction**.
+2. Renseigne les champs obligatoires du formulaire, et facultativement
+   les filtres avancés (certains menus, comme Mutuelle/Agence/Bureau,
+   sont en cascade : choisir une mutuelle restreint les agences et
+   bureaux proposés ensuite).
+3. Clique sur le bouton de génération : le tableau s'affiche avec les
    totaux utiles.
-5. Clique sur **"Télécharger en Excel"** pour récupérer le fichier `.xlsx`
+4. Clique sur **"Télécharger en Excel"** pour récupérer le fichier `.xlsx`
    (mise en forme : en-têtes colorés, montants au format numérique,
    ligne de total le cas échéant).
 
@@ -68,13 +73,15 @@ L'application s'ouvre dans le navigateur (par défaut http://localhost:8501).
 getly/
 ├── app.py                       # Shell Streamlit générique : menu, formulaire,
 │                                 # tableau, export — pilote la classe Extraction active
-├── db.py                        # Connexion Oracle générique (pool + fetch_df)
+├── db.py                        # Connexion Oracle générique (pool + fetch_df, sans plafond)
 ├── export_excel.py              # Générateur Excel générique (en-têtes, formats, totaux)
 ├── config.py                    # Lecture des paramètres depuis .env
 ├── extractions/
 │   ├── base.py                  # Interface Extraction (contrat commun)
 │   ├── __init__.py              # Registre EXTRACTIONS = [...]
-│   └── journal_ecritures.py     # 1er module : Journal des écritures
+│   ├── reference_data.py        # Référentiel partagé Mutuelle→Agence→Bureau + menu en cascade
+│   ├── journal_ecritures.py     # Module : Journal des écritures
+│   └── etat_depots.py           # Module : État des dépôts
 ├── requirements.txt
 ├── .env / .env.example
 └── README.md
@@ -87,7 +94,10 @@ livre, Liste des clients...) :
 2. Défini une dataclass de filtres avec une méthode `validate()`.
 3. Écris une sous-classe de `Extraction` (voir `extractions/base.py` pour
    le détail du contrat) avec sa requête SQL, son formulaire Streamlit
-   (`render_form`) et sa fonction d'exécution (`execute`).
+   (`render_form`) et sa fonction d'exécution (`execute`). Si ton
+   extraction a besoin d'un filtre Mutuelle/Agence/Bureau, réutilise
+   `extractions/reference_data.py` (fonctions `referentiel_localisation_cached()`
+   et `render_localisation_cascade()`) plutôt que de dupliquer la logique.
 4. Ajoute une instance de ta classe à `EXTRACTIONS` dans
    `extractions/__init__.py`.
 
@@ -111,6 +121,20 @@ le solde comptable total du compte (qui dépend d'écritures antérieures
 non incluses si la période sélectionnée ne remonte pas jusqu'à
 l'ouverture du compte).
 
+## Colonnes de l'état des dépôts
+
+Code mutuelle, Mutuelle, Code agence, Agence, Code bureau, Bureau,
+Compte général, N° compte, Code type compte, Matricule client, Solde
+débiteur, Solde créditeur, Date arrêté, Statut compte.
+
+Seuls les comptes de dépôts (compte général commençant par "25") sont
+inclus. Le solde à la date d'arrêté = dernier solde clôturé connu dans
+`SOLDE_ARRETE` (sa date d'arrêté la plus récente) + somme des mouvements
+de `ECRITURE` entre le lendemain de cette clôture et la date d'arrêté
+choisie (incluse). La date d'arrêté demandée doit donc toujours être
+postérieure à la dernière clôture disponible — l'application l'indique
+et bloque sinon.
+
 ## ⚠️ Sécurité
 
 - Le fichier `.env` contient un identifiant/mot de passe Oracle en clair.
@@ -119,13 +143,14 @@ l'ouverture du compte).
 - Il est fortement recommandé de :
   - créer un compte Oracle dédié, **en lecture seule (SELECT only)** sur
     les tables utilisées (`ECRITURE, COMPTE, CLIENT, BUREAU, REGION,
-    MUTUELLE, OPERATION`, et celles des futures extractions), plutôt que
-    d'utiliser un compte applicatif générique ;
+    MUTUELLE, OPERATION, SOLDE_ARRETE`, et celles des futures
+    extractions), plutôt que d'utiliser un compte applicatif générique ;
   - changer le mot de passe communiqué dans la conversation d'origine,
     puisqu'il a transité en clair.
-- Chaque extraction est plafonnée à `MAX_ROWS` lignes (50 000 par défaut,
-  réglable dans `.env`) pour éviter de surcharger l'application sur une
-  période/un filtre trop large.
+- Les extractions ne sont pas plafonnées en nombre de lignes : une
+  recherche très large peut ramener beaucoup de données et ralentir
+  l'application. Affiner les filtres (dates, mutuelle/agence/bureau...)
+  reste la meilleure protection.
 - Streamlit n'a pas d'authentification intégrée : si l'application est
   exposée sur le réseau, mets un reverse proxy (nginx) avec
   authentification devant, ou restreins l'accès par IP/VPN — les données
@@ -151,11 +176,12 @@ streamlit run app.py --server.address 0.0.0.0 --server.port 8501
 ```
 
 Mises à jour futures sur le serveur : `git pull` (le `.env` local n'est
-jamais touché).
+jamais touché), puis redémarrer le service (`sudo systemctl restart getly`
+si tu utilises le service systemd décrit précédemment).
 
 ## Évolutions possibles
 
-- Authentification des utilisateurs de l'application elle-même.
+- Authentification des utilisateurs, avec extractions visibles selon le
+  rôle (voir discussion en cours).
 - Nouvelles extractions (balance, grand livre, situation client...).
-- Filtre par plusieurs codes opération à la fois.
 - Export PDF en plus de l'Excel.
