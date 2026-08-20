@@ -13,10 +13,18 @@ from typing import Optional
 from extractions.base import Extraction
 from extractions.journal_ecritures import JournalEcrituresExtraction
 from extractions.etat_depots import EtatDepotsExtraction
+from extractions.classement_encours import (
+    PlusGrosConsommateursExtraction,
+    PlusPetitsConsommateursExtraction,
+    PlusGrosContentieuxExtraction,
+)
 
 EXTRACTIONS: list[Extraction] = [
     JournalEcrituresExtraction(),
     EtatDepotsExtraction(),
+    PlusGrosConsommateursExtraction(),
+    PlusPetitsConsommateursExtraction(),
+    PlusGrosContentieuxExtraction(),
     # Ajoute ici les futures extractions, ex. :
     # BalanceComptableExtraction(),
     # GrandLivreExtraction(),

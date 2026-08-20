@@ -16,6 +16,15 @@ nouvelles facilement.
   général, n° compte, code type compte, statut compte, exclusion des
   soldes nuls, et localisation hiérarchique facultatifs → tableau des
   soldes débiteurs/créditeurs par compte → export Excel.
+- 📈 **Plus gros consommateurs** — date d'arrêté obligatoire (liste
+  déroulante, dernière disponible par défaut) ; localisation hiérarchique
+  facultative → top 50 des clients emprunteurs par encours cumulé, comptes
+  sains (sans impayé) → export Excel.
+- 📉 **Plus petits consommateurs** — mêmes critères, classement inversé,
+  avec un plancher d'encours (≥ 1000) pour exclure les encours résiduels
+  quasi nuls → export Excel.
+- ⚠️ **Plus gros contentieux** — mêmes critères, mais sur les clients en
+  impayé (PAR 90/180/360), avec les provisions associées → export Excel.
 
 ## ⚠️ Important : réseau
 
@@ -81,7 +90,8 @@ getly/
 │   ├── __init__.py              # Registre EXTRACTIONS = [...]
 │   ├── reference_data.py        # Référentiel partagé Mutuelle→Agence→Bureau + menu en cascade
 │   ├── journal_ecritures.py     # Module : Journal des écritures
-│   └── etat_depots.py           # Module : État des dépôts
+│   ├── etat_depots.py           # Module : État des dépôts
+│   └── classement_encours.py    # Modules : Plus gros/petits consommateurs, Plus gros contentieux
 ├── requirements.txt
 ├── .env / .env.example
 └── README.md
@@ -135,6 +145,19 @@ choisie (incluse). La date d'arrêté demandée doit donc toujours être
 postérieure à la dernière clôture disponible — l'application l'indique
 et bloque sinon.
 
+## Colonnes des classements (Plus gros/petits consommateurs, Plus gros contentieux)
+
+Matricule client, Nom client, Secteur, Encours capital cumulé,
+Garantie(s), *Provisions (uniquement Plus gros contentieux)*, Code
+bureau, Bureau, Code agence, Agence, Code mutuelle, Mutuelle, Rang.
+
+Les 3 extractions partagent la même logique (table `ENC_BRUT` à la date
+d'arrêté choisie, encours cumulé par client sur ses prêts non affectés
+en ressources externes, hors pertes) et ne diffèrent que par le seuil
+d'encours, la condition d'impayé et l'ordre du classement (voir le
+docstring de `extractions/classement_encours.py`). Seuls les 50 premiers
+sont retournés dans chaque cas.
+
 ## ⚠️ Sécurité
 
 - Le fichier `.env` contient un identifiant/mot de passe Oracle en clair.
@@ -143,8 +166,10 @@ et bloque sinon.
 - Il est fortement recommandé de :
   - créer un compte Oracle dédié, **en lecture seule (SELECT only)** sur
     les tables utilisées (`ECRITURE, COMPTE, CLIENT, BUREAU, REGION,
-    MUTUELLE, OPERATION, SOLDE_ARRETE`, et celles des futures
-    extractions), plutôt que d'utiliser un compte applicatif générique ;
+    MUTUELLE, OPERATION, SOLDE_ARRETE, ENC_BRUT, PRET, TYPE_PRET,
+    GARANTIES, TYPE_GARANTIE, SOUS_SECTEUR, SECTEUR`, et celles des
+    futures extractions), plutôt que d'utiliser un compte applicatif
+    générique ;
   - changer le mot de passe communiqué dans la conversation d'origine,
     puisqu'il a transité en clair.
 - Les extractions ne sont pas plafonnées en nombre de lignes : une
