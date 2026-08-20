@@ -7,7 +7,10 @@ de localisation en cascade, sans dupliquer la requête ni le widget.
 Contient aussi `get_derniere_date_arrete()` (dernière clôture connue dans
 SOLDE_ARRETE), utilisée par toutes les extractions basées sur "dernière
 clôture + mouvements jusqu'à une date choisie" (État des dépôts, Plus
-gros/petits déposants).
+gros/petits déposants), ainsi que `get_dates_arrete_disponibles()`
+(dates d'arrêté distinctes dans ENC_BRUT), utilisée par les extractions
+basées sur un instantané ENC_BRUT à une date choisie (classements
+d'encours, Balance Agée).
 """
 
 from __future__ import annotations
@@ -37,6 +40,20 @@ def get_derniere_date_arrete() -> Optional[dt.date]:
 @st.cache_data(ttl=900, show_spinner=False)
 def derniere_date_arrete_cached() -> Optional[dt.date]:
     return get_derniere_date_arrete()
+
+
+def get_dates_arrete_disponibles() -> list[dt.date]:
+    """Dates d'arrêté distinctes disponibles dans ENC_BRUT, la plus récente en premier."""
+    df = fetch_df("SELECT DISTINCT date_arrete FROM enc_brut ORDER BY date_arrete DESC")
+    if df.empty:
+        return []
+    valeurs = df.iloc[:, 0].tolist()
+    return [v.date() if isinstance(v, dt.datetime) else v for v in valeurs]
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def dates_arrete_enc_brut_cached() -> list[dt.date]:
+    return get_dates_arrete_disponibles()
 
 
 def get_referentiel_localisation() -> pd.DataFrame:

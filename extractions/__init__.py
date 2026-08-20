@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from extractions.base import Extraction
+from extractions.balance_agee import BalanceAgeeExtraction
 from extractions.journal_ecritures import JournalEcrituresExtraction
 from extractions.etat_depots import EtatDepotsExtraction
 from extractions.classement_encours import (
@@ -24,6 +25,7 @@ from extractions.classement_depots import (
 )
 
 EXTRACTIONS: list[Extraction] = [
+    BalanceAgeeExtraction(),
     JournalEcrituresExtraction(),
     EtatDepotsExtraction(),
     PlusGrosConsommateursExtraction(),

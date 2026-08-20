@@ -34,7 +34,11 @@ import streamlit as st
 
 from db import fetch_df
 from extractions.base import Extraction
-from extractions.reference_data import referentiel_localisation_cached, render_localisation_cascade
+from extractions.reference_data import (
+    dates_arrete_enc_brut_cached,
+    referentiel_localisation_cached,
+    render_localisation_cascade,
+)
 
 # ---------------------------------------------------------------------------
 # Filtres du formulaire (communs aux 3 extractions)
@@ -63,15 +67,6 @@ _COND_PAR_SAIN = (
     "AND NVL(eb.par_360, 0) = 0 AND NVL(eb.par_720, 0) = 0"
 )
 _COND_PAR_CONTENTIEUX = "(NVL(eb.par_90, 0) + NVL(eb.par_180, 0) + NVL(eb.par_360, 0)) > 0"
-
-
-def get_dates_arrete_disponibles() -> list[dt.date]:
-    """Dates d'arrêté distinctes disponibles dans ENC_BRUT, la plus récente en premier."""
-    df = fetch_df("SELECT DISTINCT date_arrete FROM enc_brut ORDER BY date_arrete DESC")
-    if df.empty:
-        return []
-    valeurs = df.iloc[:, 0].tolist()
-    return [v.date() if isinstance(v, dt.datetime) else v for v in valeurs]
 
 
 def _colonnes_finales(avec_provisions: bool) -> list[str]:
@@ -227,14 +222,9 @@ def get_classement(
 # ---------------------------------------------------------------------------
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def _dates_arrete_cached() -> list[dt.date]:
-    return get_dates_arrete_disponibles()
-
-
 def _render_form_commun(titre_bouton: str, key_prefix: str) -> Optional[ClassementFilters]:
     try:
-        dates_dispo = _dates_arrete_cached()
+        dates_dispo = dates_arrete_enc_brut_cached()
     except Exception:  # noqa: BLE001
         dates_dispo = []
         st.warning(

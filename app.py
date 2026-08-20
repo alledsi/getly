@@ -1,8 +1,8 @@
 """
-Getly — plateforme d'extractions comptables (core banking ACEP)
+Getly — rapports et extractions ACEP
 
-Menu latéral pour choisir le type d'extraction, formulaire propre à
-l'extraction sélectionnée, tableau de résultat, export Excel.
+Menu latéral pour choisir un rapport, formulaire propre à l'extraction
+sélectionnée, tableau de résultat, export Excel.
 
 Lancement :
     streamlit run app.py
@@ -23,12 +23,12 @@ st.set_page_config(page_title="Getly", page_icon="📊", layout="wide")
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.title("📊 Getly")
-    st.caption("Extractions comptables — core banking ACEP")
+    st.caption("Rapports et extractions — ACEP")
 
-    st.subheader("Type d'extraction")
+    st.subheader("Choisir un rapport")
     labels = {f"{e.icon}  {e.label}": e.id for e in EXTRACTIONS}
     choix_label = st.radio(
-        "Type d'extraction", list(labels.keys()), label_visibility="collapsed"
+        "Choisir un rapport", list(labels.keys()), label_visibility="collapsed"
     )
     extraction_id = labels[choix_label]
 

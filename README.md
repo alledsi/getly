@@ -7,6 +7,11 @@ nouvelles facilement.
 
 **Extractions disponibles aujourd'hui :**
 
+- 📋 **Balance Agée** — date d'arrêté obligatoire (liste déroulante,
+  dernière disponible par défaut) ; genre, ressource affectée, matricule
+  client, n° prêt, secteur d'activité, classe d'âge, et localisation
+  hiérarchique facultatifs → détail des prêts en cours (un par ligne)
+  avec échéancier, retards par tranche et garanties → export Excel.
 - 📒 **Journal des écritures** — un ou plusieurs codes opération, date
   début, date fin obligatoires ; matricule client, n° compte, sens
   écriture, et localisation hiérarchique (mutuelle → agence → bureau)
@@ -97,7 +102,8 @@ getly/
 │   ├── base.py                  # Interface Extraction (contrat commun)
 │   ├── __init__.py              # Registre EXTRACTIONS = [...]
 │   ├── reference_data.py        # Référentiel partagé Mutuelle→Agence→Bureau + menu en cascade
-│   │                             # + dernière date de clôture SOLDE_ARRETE
+│   │                             # + dernière clôture SOLDE_ARRETE + dates d'arrêté ENC_BRUT
+│   ├── balance_agee.py          # Module : Balance Agée
 │   ├── journal_ecritures.py     # Module : Journal des écritures
 │   ├── etat_depots.py           # Module : État des dépôts
 │   ├── classement_encours.py    # Modules : Plus gros/petits consommateurs, Plus gros contentieux
@@ -123,6 +129,26 @@ livre, Liste des clients...) :
 
 L'application (menu, tableau, export Excel) s'adapte automatiquement —
 aucune autre modification n'est nécessaire.
+
+## Colonnes de la Balance Agée
+
+Code mutuelle, Mutuelle, Code agence, Agence, Code bureau, Bureau,
+Matricule client, Nom client, Genre, Âge, Classe d'âge, Ancienneté, N°
+prêt, Type de prêt, Taille du prêt, Cycle, Date mise en place, Durée
+(jours), Durée (mois), Montant capital prêté, Frais d'actes, Montant
+frais de dossier, Assurance agricole, Montant intérêt prêt, Intérêt
+capitalisé, Taux d'intérêt, Montant échéance, Périodicité échéance,
+Nombre d'échéances, Date première échéance, Date dernière échéance,
+Encours capital, Impayé capital, Montant impayé, Durée impayé, Crédit
+jour, Retard 29/30/60/90/180/360/720 jours, Cycle prêt, Code secteur,
+Secteur d'activité, Sous-secteur d'activité, Ressource affectée,
+Catégorie, Nombre d'hommes, Nombre de femmes, Garantie(s), Valeur
+garantie.
+
+Un prêt en cours par ligne (table `ENC_BRUT`, encours non nul, hors
+pertes) à la date d'arrêté choisie (liste déroulante des dates
+disponibles). Pas de plafond sur le nombre de résultats — filtrer par
+localisation, secteur ou classe d'âge si le volume est trop important.
 
 ## Colonnes du journal des écritures
 
@@ -190,10 +216,10 @@ d'encours. Seuls les 50 premiers sont retournés dans chaque cas.
 - Il est fortement recommandé de :
   - créer un compte Oracle dédié, **en lecture seule (SELECT only)** sur
     les tables utilisées (`ECRITURE, COMPTE, CLIENT, BUREAU, REGION,
-    MUTUELLE, OPERATION, SOLDE_ARRETE, ENC_BRUT, PRET, TYPE_PRET,
-    GARANTIES, TYPE_GARANTIE, SOUS_SECTEUR, SECTEUR`, et celles des
-    futures extractions), plutôt que d'utiliser un compte applicatif
-    générique ;
+    REGION_OPERAT, MUTUELLE, OPERATION, SOLDE_ARRETE, ENC_BRUT, PRET,
+    TYPE_PRET, GARANTIES, TYPE_GARANTIE, SOUS_SECTEUR, SECTEUR,
+    CATEGORIE`, et celles des futures extractions), plutôt que d'utiliser
+    un compte applicatif générique ;
   - changer le mot de passe communiqué dans la conversation d'origine,
     puisqu'il a transité en clair.
 - Les extractions ne sont pas plafonnées en nombre de lignes : une
