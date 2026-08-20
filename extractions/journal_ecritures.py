@@ -1,11 +1,17 @@
 """
 Extraction : Journal des écritures.
 
-Formulaire (code opération, date début, date fin obligatoires ;
-matricule client, n° compte, bureau, agence, mutuelle, sens écriture
-facultatifs) => journal des écritures comptables du core banking ACEP,
-avec solde cumulé par compte. Toutes les lignes correspondantes sont
-retournées, sans plafond.
+Formulaire : un ou plusieurs codes opération, date début, date fin
+obligatoires. Filtres avancés facultatifs, en deux groupes :
+  - identification : matricule client, n° compte, sens écriture
+  - localisation, hiérarchique (Mutuelle -> Agence -> Bureau) : choisir
+    une mutuelle restreint les agences et bureaux proposés à cette
+    mutuelle, choisir une agence restreint en plus les bureaux à cette
+    agence.
+
+=> journal des écritures comptables du core banking ACEP, avec solde
+cumulé par compte. Toutes les lignes correspondantes sont retournées,
+sans plafond.
 """
 
 from __future__ import annotations
@@ -27,19 +33,19 @@ from extractions.base import Extraction
 
 @dataclass
 class JournalFilters:
-    code_operation: str
+    code_operations: list[str]
     date_debut: dt.date
     date_fin: dt.date
     matricule_client: Optional[str] = None
     no_compte: Optional[str] = None
-    code_bureau: Optional[str] = None
-    code_agence: Optional[str] = None
-    code_mutuelle: Optional[str] = None
     sens_ecriture: Optional[str] = None
+    code_mutuelle: Optional[str] = None
+    code_agence: Optional[str] = None
+    code_bureau: Optional[str] = None
 
     def validate(self) -> Optional[str]:
-        if not self.code_operation:
-            return "Le code opération est obligatoire."
+        if not self.code_operations:
+            return "Au moins un code opération est obligatoire."
         if not self.date_debut or not self.date_fin:
             return "La date de début et la date de fin sont obligatoires."
         if self.date_debut > self.date_fin:
@@ -81,8 +87,7 @@ _BASE_SQL = """
     LEFT JOIN REGION   r   ON r.CODE_REGION = b.CODE_REGION
     LEFT JOIN MUTUELLE m   ON m.CODE_MUTUELLE = r.CODE_MUTUELLE
     LEFT JOIN OPERATION o  ON o.CODE_OPER = e.CODE_OPER
-    WHERE e.CODE_OPER = :code_operation
-      AND e.D_ECR >= :date_debut
+    WHERE e.D_ECR >= :date_debut
       AND e.D_ECR <  :date_fin_exclusive
 """
 
@@ -119,21 +124,22 @@ def get_operations() -> pd.DataFrame:
     return fetch_df(sql)
 
 
-def get_bureaux() -> pd.DataFrame:
-    """Liste des bureaux disponibles (table BUREAU), pour le menu déroulant."""
-    sql = "SELECT CODE_BUREAU, LIBELLE_BUREAU FROM BUREAU ORDER BY LIBELLE_BUREAU"
-    return fetch_df(sql)
-
-
-def get_agences() -> pd.DataFrame:
-    """Liste des agences disponibles (table REGION), pour le menu déroulant."""
-    sql = "SELECT CODE_REGION, LIB_REGION FROM REGION ORDER BY LIB_REGION"
-    return fetch_df(sql)
-
-
-def get_mutuelles() -> pd.DataFrame:
-    """Liste des mutuelles disponibles (table MUTUELLE), pour le menu déroulant."""
-    sql = "SELECT CODE_MUTUELLE, NOM_MUTUELLE FROM MUTUELLE ORDER BY NOM_MUTUELLE"
+def get_referentiel_localisation() -> pd.DataFrame:
+    """
+    Bureaux avec leur agence et leur mutuelle (hiérarchie
+    Mutuelle -> Agence -> Bureau), pour construire les menus déroulants
+    en cascade du formulaire.
+    """
+    sql = """
+        SELECT
+            b.CODE_BUREAU, b.LIBELLE_BUREAU,
+            r.CODE_REGION, r.LIB_REGION,
+            m.CODE_MUTUELLE, m.NOM_MUTUELLE
+        FROM BUREAU b
+        LEFT JOIN REGION r   ON r.CODE_REGION = b.CODE_REGION
+        LEFT JOIN MUTUELLE m ON m.CODE_MUTUELLE = r.CODE_MUTUELLE
+        ORDER BY m.NOM_MUTUELLE, r.LIB_REGION, b.LIBELLE_BUREAU
+    """
     return fetch_df(sql)
 
 
@@ -153,12 +159,17 @@ def get_journal(filters: JournalFilters) -> pd.DataFrame:
 
     sql = _BASE_SQL
     params: dict = {
-        "code_operation": filters.code_operation.strip(),
         "date_debut": dt.datetime.combine(filters.date_debut, dt.time.min),
         "date_fin_exclusive": dt.datetime.combine(
             filters.date_fin + dt.timedelta(days=1), dt.time.min
         ),
     }
+
+    # Un ou plusieurs codes opération (IN)
+    placeholders = ", ".join(f":cop_{i}" for i in range(len(filters.code_operations)))
+    sql += f" AND e.CODE_OPER IN ({placeholders})"
+    for i, code in enumerate(filters.code_operations):
+        params[f"cop_{i}"] = code.strip()
 
     if filters.matricule_client:
         sql += " AND cl.MATRICULE_CLIENT = :matricule_client"
@@ -168,21 +179,21 @@ def get_journal(filters: JournalFilters) -> pd.DataFrame:
         sql += " AND e.NO_COMPTE = :no_compte"
         params["no_compte"] = filters.no_compte.strip()
 
-    if filters.code_bureau:
-        sql += " AND b.CODE_BUREAU = :code_bureau"
-        params["code_bureau"] = filters.code_bureau.strip()
-
-    if filters.code_agence:
-        sql += " AND r.CODE_REGION = :code_agence"
-        params["code_agence"] = filters.code_agence.strip()
+    if filters.sens_ecriture:
+        sql += " AND e.SENS_ECR = :sens_ecriture"
+        params["sens_ecriture"] = filters.sens_ecriture.strip()
 
     if filters.code_mutuelle:
         sql += " AND m.CODE_MUTUELLE = :code_mutuelle"
         params["code_mutuelle"] = filters.code_mutuelle.strip()
 
-    if filters.sens_ecriture:
-        sql += " AND e.SENS_ECR = :sens_ecriture"
-        params["sens_ecriture"] = filters.sens_ecriture.strip()
+    if filters.code_agence:
+        sql += " AND r.CODE_REGION = :code_agence"
+        params["code_agence"] = filters.code_agence.strip()
+
+    if filters.code_bureau:
+        sql += " AND b.CODE_BUREAU = :code_bureau"
+        params["code_bureau"] = filters.code_bureau.strip()
 
     sql += _ORDER_SQL
 
@@ -225,18 +236,8 @@ def _liste_operations_cached() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def _liste_bureaux_cached() -> pd.DataFrame:
-    return get_bureaux()
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def _liste_agences_cached() -> pd.DataFrame:
-    return get_agences()
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def _liste_mutuelles_cached() -> pd.DataFrame:
-    return get_mutuelles()
+def _referentiel_localisation_cached() -> pd.DataFrame:
+    return get_referentiel_localisation()
 
 
 def _select_code_libelle(
@@ -247,14 +248,26 @@ def _select_code_libelle(
     placeholder: str,
     key: str,
     max_chars: Optional[int] = None,
+    allow_text_fallback: bool = True,
 ) -> str:
     """
     Menu déroulant "CODE — Libellé" construit à partir d'un DataFrame de
-    référence. Si la liste n'a pas pu être chargée, retombe sur un champ
-    texte libre. Retourne le code sélectionné (chaîne vide si aucun choix).
+    référence (éventuellement déjà filtré par le choix précédent dans une
+    cascade). Retourne le code sélectionné (chaîne vide si aucun choix).
+
+    - Si `df` est vide ET `allow_text_fallback` est vrai (liste de
+      référence indisponible), retombe sur un champ texte libre.
+    - Si `df` est vide et `allow_text_fallback` est faux (cas d'une
+      cascade dont le filtre parent ne laisse aucun résultat), affiche un
+      menu désactivé plutôt qu'un champ texte trompeur.
     """
     if df.empty:
-        return st.text_input(label, max_chars=max_chars, key=f"{key}_txt") or ""
+        if allow_text_fallback:
+            return st.text_input(label, max_chars=max_chars, key=f"{key}_txt") or ""
+        st.selectbox(
+            label, options=[], placeholder="Aucun résultat", disabled=True, key=f"{key}_vide"
+        )
+        return ""
 
     options = [f"{getattr(row, code_col)} — {getattr(row, libelle_col)}" for row in df.itertuples()]
     choix = st.selectbox(label, options=options, index=None, placeholder=placeholder, key=key)
@@ -298,99 +311,165 @@ class JournalEcrituresExtraction(Extraction):
     total_cols = {"DEBIT", "CREDIT"}  # on ne totalise pas le solde (cumul), juste débit/crédit
 
     def render_form(self) -> Optional[JournalFilters]:
-        avertissement = (
-            "Impossible de charger cette liste depuis la base (vérifie que le "
-            "fichier .env est bien configuré et que le serveur a accès à la "
-            "base). Tu peux saisir la valeur manuellement ci-dessous."
-        )
+        # NB : pas de st.form ici — les menus Mutuelle/Agence/Bureau sont en
+        # cascade et doivent se recalculer immédiatement quand on change un
+        # choix, ce que st.form empêche (il ne rerun qu'à la soumission).
 
         try:
             operations_df = _liste_operations_cached()
         except Exception:  # noqa: BLE001
             operations_df = pd.DataFrame(columns=["CODE_OPER", "LIB_OPER"])
-            st.warning(f"Codes opération : {avertissement}")
-
-        try:
-            bureaux_df = _liste_bureaux_cached()
-        except Exception:  # noqa: BLE001
-            bureaux_df = pd.DataFrame(columns=["CODE_BUREAU", "LIBELLE_BUREAU"])
-
-        try:
-            agences_df = _liste_agences_cached()
-        except Exception:  # noqa: BLE001
-            agences_df = pd.DataFrame(columns=["CODE_REGION", "LIB_REGION"])
-
-        try:
-            mutuelles_df = _liste_mutuelles_cached()
-        except Exception:  # noqa: BLE001
-            mutuelles_df = pd.DataFrame(columns=["CODE_MUTUELLE", "NOM_MUTUELLE"])
-
-        with st.form("form_journal_ecritures"):
-            st.subheader("Critères de recherche")
-
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                code_operation = _select_code_libelle(
-                    "Code opération *",
-                    operations_df,
-                    "CODE_OPER",
-                    "LIB_OPER",
-                    "Sélectionner un code opération",
-                    "code_operation",
-                    max_chars=3,
-                )
-
-            with col2:
-                date_debut = st.date_input(
-                    "Date début *", value=dt.date.today() - dt.timedelta(days=30)
-                )
-
-            with col3:
-                date_fin = st.date_input("Date fin *", value=dt.date.today())
-
-            with st.expander("Filtres avancés (facultatifs)"):
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    matricule_client = st.text_input("Matricule client")
-                    no_compte = st.text_input("N° compte")
-                with c2:
-                    code_bureau = _select_code_libelle(
-                        "Bureau", bureaux_df, "CODE_BUREAU", "LIBELLE_BUREAU", "Tous", "code_bureau"
-                    )
-                    code_agence = _select_code_libelle(
-                        "Agence", agences_df, "CODE_REGION", "LIB_REGION", "Toutes", "code_agence"
-                    )
-                with c3:
-                    code_mutuelle = _select_code_libelle(
-                        "Mutuelle", mutuelles_df, "CODE_MUTUELLE", "NOM_MUTUELLE", "Toutes", "code_mutuelle"
-                    )
-                    choix_sens = st.selectbox(
-                        "Sens écriture",
-                        options=["D — Débit", "C — Crédit"],
-                        index=None,
-                        placeholder="Tous",
-                        key="sens_ecriture",
-                    )
-                    sens_ecriture = choix_sens.split(" — ")[0] if choix_sens else ""
-
-            submitted = st.form_submit_button(
-                "🔍 Générer le journal", width="stretch"
+            st.warning(
+                "Impossible de charger la liste des codes opération depuis la "
+                "base (vérifie que le fichier .env est bien configuré et que "
+                "le serveur a accès à la base). Tu peux saisir les codes "
+                "manuellement ci-dessous, séparés par une virgule."
             )
+
+        try:
+            ref_localisation_df = _referentiel_localisation_cached()
+        except Exception:  # noqa: BLE001
+            ref_localisation_df = pd.DataFrame(
+                columns=[
+                    "CODE_BUREAU", "LIBELLE_BUREAU",
+                    "CODE_REGION", "LIB_REGION",
+                    "CODE_MUTUELLE", "NOM_MUTUELLE",
+                ]
+            )
+            st.warning(
+                "Impossible de charger la liste des mutuelles/agences/bureaux "
+                "depuis la base. Tu peux saisir les codes manuellement dans "
+                "les filtres avancés."
+            )
+
+        localisation_indisponible = ref_localisation_df.empty
+
+        st.subheader("Critères de recherche")
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            if not operations_df.empty:
+                options = [
+                    f"{row.CODE_OPER} — {row.LIB_OPER}" for row in operations_df.itertuples()
+                ]
+                choix_ops = st.multiselect(
+                    "Code(s) opération *",
+                    options=options,
+                    placeholder="Sélectionner un ou plusieurs codes opération",
+                    key="code_operations",
+                )
+                code_operations = [c.split(" — ")[0] for c in choix_ops]
+            else:
+                saisie_ops = st.text_input(
+                    "Code(s) opération * (séparés par une virgule)", key="code_operations_txt"
+                )
+                code_operations = [c.strip() for c in saisie_ops.split(",") if c.strip()]
+
+        with col2:
+            date_debut = st.date_input(
+                "Date début *", value=dt.date.today() - dt.timedelta(days=30)
+            )
+
+        with col3:
+            date_fin = st.date_input("Date fin *", value=dt.date.today())
+
+        with st.expander("Filtres avancés (facultatifs)"):
+            st.caption("Identification")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                matricule_client = st.text_input("Matricule client")
+            with c2:
+                no_compte = st.text_input("N° compte")
+            with c3:
+                choix_sens = st.selectbox(
+                    "Sens écriture",
+                    options=["D — Débit", "C — Crédit"],
+                    index=None,
+                    placeholder="Tous",
+                    key="sens_ecriture",
+                )
+                sens_ecriture = choix_sens.split(" — ")[0] if choix_sens else ""
+
+            st.caption("Localisation (Mutuelle → Agence → Bureau)")
+            c4, c5, c6 = st.columns(3)
+
+            with c4:
+                mutuelles_df = (
+                    ref_localisation_df[["CODE_MUTUELLE", "NOM_MUTUELLE"]]
+                    .dropna()
+                    .drop_duplicates()
+                    .sort_values("NOM_MUTUELLE")
+                )
+                code_mutuelle = _select_code_libelle(
+                    "Mutuelle", mutuelles_df, "CODE_MUTUELLE", "NOM_MUTUELLE",
+                    "Toutes", "code_mutuelle",
+                    allow_text_fallback=localisation_indisponible,
+                )
+
+            # Réinitialise les choix dépendants quand la mutuelle change
+            if code_mutuelle != st.session_state.get("_last_code_mutuelle"):
+                st.session_state.pop("code_agence", None)
+                st.session_state.pop("code_bureau", None)
+                st.session_state["_last_code_mutuelle"] = code_mutuelle
+
+            perimetre_mutuelle = (
+                ref_localisation_df
+                if not code_mutuelle
+                else ref_localisation_df[ref_localisation_df["CODE_MUTUELLE"] == code_mutuelle]
+            )
+
+            with c5:
+                agences_df = (
+                    perimetre_mutuelle[["CODE_REGION", "LIB_REGION"]]
+                    .dropna()
+                    .drop_duplicates()
+                    .sort_values("LIB_REGION")
+                )
+                code_agence = _select_code_libelle(
+                    "Agence", agences_df, "CODE_REGION", "LIB_REGION",
+                    "Toutes", "code_agence",
+                    allow_text_fallback=localisation_indisponible,
+                )
+
+            # Réinitialise le bureau quand l'agence change
+            if code_agence != st.session_state.get("_last_code_agence"):
+                st.session_state.pop("code_bureau", None)
+                st.session_state["_last_code_agence"] = code_agence
+
+            perimetre_agence = (
+                perimetre_mutuelle
+                if not code_agence
+                else perimetre_mutuelle[perimetre_mutuelle["CODE_REGION"] == code_agence]
+            )
+
+            with c6:
+                bureaux_df = (
+                    perimetre_agence[["CODE_BUREAU", "LIBELLE_BUREAU"]]
+                    .dropna()
+                    .drop_duplicates()
+                    .sort_values("LIBELLE_BUREAU")
+                )
+                code_bureau = _select_code_libelle(
+                    "Bureau", bureaux_df, "CODE_BUREAU", "LIBELLE_BUREAU",
+                    "Tous", "code_bureau",
+                    allow_text_fallback=localisation_indisponible,
+                )
+
+        submitted = st.button("🔍 Générer le journal", width="stretch", type="primary")
 
         if not submitted:
             return None
 
         filters = JournalFilters(
-            code_operation=code_operation,
+            code_operations=code_operations,
             date_debut=date_debut,
             date_fin=date_fin,
             matricule_client=matricule_client or None,
             no_compte=no_compte or None,
-            code_bureau=code_bureau or None,
-            code_agence=code_agence or None,
-            code_mutuelle=code_mutuelle or None,
             sens_ecriture=sens_ecriture or None,
+            code_mutuelle=code_mutuelle or None,
+            code_agence=code_agence or None,
+            code_bureau=code_bureau or None,
         )
 
         erreur = filters.validate()
@@ -403,7 +482,12 @@ class JournalEcrituresExtraction(Extraction):
         return get_journal(filters)
 
     def excel_filename(self, filters: JournalFilters) -> str:
+        codes = filters.code_operations
+        if len(codes) <= 3:
+            codes_part = "-".join(codes)
+        else:
+            codes_part = "-".join(codes[:3]) + f"-et{len(codes) - 3}autres"
         return (
-            f"journal_{filters.code_operation}_"
+            f"journal_{codes_part}_"
             f"{filters.date_debut:%Y%m%d}_{filters.date_fin:%Y%m%d}.xlsx"
         )
