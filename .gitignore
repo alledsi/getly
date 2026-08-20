@@ -1,4 +1,5 @@
 .env
+getly_users.db
 __pycache__/
 *.pyc
 .venv/

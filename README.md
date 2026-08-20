@@ -76,6 +76,43 @@ streamlit run app.py
 
 L'application s'ouvre dans le navigateur (par défaut http://localhost:8501).
 
+## Authentification
+
+L'application est protégée par un écran de connexion : il faut un compte
+pour accéder aux rapports. Les comptes sont stockés dans une base SQLite
+locale (`getly_users.db`, créée automatiquement au premier lancement,
+**propre à chaque poste/serveur** — comme `.env`, elle n'est jamais
+versionnée dans Git, donc chaque déploiement a ses propres comptes).
+
+**Premier lancement :** un compte administrateur par défaut est créé
+automatiquement :
+
+```
+Identifiant : admin
+Mot de passe : admin123
+```
+
+Ce mot de passe provisoire doit être changé dès la première connexion —
+l'application l'impose avant de donner accès au reste du menu.
+
+**Rôles :**
+- *Utilisateur* : accès aux rapports et à « Mon compte » (changer son
+  propre mot de passe).
+- *Administrateur* : accès en plus à « Administration », pour créer des
+  comptes, changer un rôle, activer/désactiver un compte, réinitialiser
+  le mot de passe d'un utilisateur (celui-ci devra alors le changer à sa
+  prochaine connexion), ou supprimer un compte. Le dernier administrateur
+  actif ne peut pas être rétrogradé, désactivé ou supprimé (pour éviter
+  de se retrouver sans accès administrateur).
+
+Tout utilisateur peut changer son propre mot de passe depuis « Mon
+compte » (ancien mot de passe requis). Les mots de passe sont hachés
+(PBKDF2-HMAC-SHA256, sel aléatoire par compte) — jamais stockés en clair.
+
+Sur un nouveau déploiement (ex. premier `git pull` sur le serveur), pense
+à te connecter avec `admin` / `admin123`, changer ce mot de passe, puis
+créer les comptes de l'équipe depuis « Administration ».
+
 ## Utilisation
 
 1. Dans la barre latérale, choisis le **type d'extraction**.
@@ -93,8 +130,10 @@ L'application s'ouvre dans le navigateur (par défaut http://localhost:8501).
 
 ```
 getly/
-├── app.py                       # Shell Streamlit générique : menu, formulaire,
+├── app.py                       # Shell Streamlit générique : auth, menu, formulaire,
 │                                 # tableau, export — pilote la classe Extraction active
+├── auth.py                      # Authentification + administration des comptes (SQLite, hachage)
+├── auth_ui.py                   # Écrans Streamlit : connexion, mon compte, administration
 ├── db.py                        # Connexion Oracle générique (pool + fetch_df, sans plafond)
 ├── export_excel.py              # Générateur Excel générique (en-têtes, formats, totaux)
 ├── config.py                    # Lecture des paramètres depuis .env
@@ -110,6 +149,7 @@ getly/
 │   └── classement_depots.py     # Modules : Plus gros/petits déposants
 ├── requirements.txt
 ├── .env / .env.example
+├── getly_users.db               # Base des comptes (créée au 1er lancement, exclue de Git)
 └── README.md
 ```
 
@@ -226,10 +266,17 @@ d'encours. Seuls les 50 premiers sont retournés dans chaque cas.
   recherche très large peut ramener beaucoup de données et ralentir
   l'application. Affiner les filtres (dates, mutuelle/agence/bureau...)
   reste la meilleure protection.
-- Streamlit n'a pas d'authentification intégrée : si l'application est
-  exposée sur le réseau, mets un reverse proxy (nginx) avec
-  authentification devant, ou restreins l'accès par IP/VPN — les données
-  affichées sont des écritures comptables et des informations clients.
+- L'application impose désormais une connexion (voir « Authentification »
+  ci-dessus). Change le mot de passe de `admin` dès le premier lancement
+  sur chaque nouveau déploiement (poste ou serveur). Le fichier
+  `getly_users.db` contient les mots de passe **hachés** (jamais en
+  clair) mais reste un fichier sensible : il est exclu de Git, ne le
+  partage pas non plus.
+- Cette authentification protège l'accès à l'application elle-même, mais
+  ne restreint pas encore les données visibles selon l'utilisateur (tous
+  les comptes voient les mêmes rapports). Si l'application est exposée
+  au-delà du réseau interne, ajoute en complément un reverse proxy
+  (nginx) ou une restriction par IP/VPN.
 
 ## Déploiement (GitHub + serveur)
 
@@ -250,13 +297,20 @@ pip install -r requirements.txt
 streamlit run app.py --server.address 0.0.0.0 --server.port 8501
 ```
 
-Mises à jour futures sur le serveur : `git pull` (le `.env` local n'est
-jamais touché), puis redémarrer le service (`sudo systemctl restart getly`
-si tu utilises le service systemd décrit précédemment).
+Au tout premier lancement sur le serveur, `getly_users.db` est créé
+automatiquement avec le compte `admin` / `admin123` par défaut —
+connecte-toi et change ce mot de passe immédiatement (voir
+« Authentification » ci-dessus), puis crée les comptes de l'équipe.
+
+Mises à jour futures sur le serveur : `git pull` (le `.env` et le
+`getly_users.db` locaux ne sont jamais touchés), puis redémarrer le
+service (`sudo systemctl restart getly` si tu utilises le service
+systemd décrit précédemment).
 
 ## Évolutions possibles
 
-- Authentification des utilisateurs, avec extractions visibles selon le
-  rôle (voir discussion en cours).
+- Extractions visibles/filtrées selon le rôle ou la localisation de
+  l'utilisateur (l'authentification de base est en place, cette
+  granularité reste à ajouter si besoin).
 - Nouvelles extractions (balance, grand livre, situation client...).
 - Export PDF en plus de l'Excel.

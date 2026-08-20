@@ -60,7 +60,7 @@ class DepotsClassementFilters:
             return "La date d'arrêté est obligatoire."
         if self.derniere_cloture is None:
             return (
-                "Aucune clôture de solde n'a été trouvée dans SOLDE_ARRETE : "
+                "Aucune clôture de solde n'a été trouvée : "
                 "impossible de calculer ce classement."
             )
         if self.date_arrete <= self.derniere_cloture:
@@ -214,7 +214,7 @@ def _render_form_commun(titre_bouton: str, key_prefix: str) -> Optional[DepotsCl
     except Exception:  # noqa: BLE001
         derniere_cloture = None
         st.warning(
-            "Impossible de charger la dernière clôture depuis SOLDE_ARRETE "
+            "Impossible de charger la dernière clôture disponible "
             "(vérifie que le fichier .env est bien configuré et que le "
             "serveur a accès à la base)."
         )
@@ -251,7 +251,7 @@ def _render_form_commun(titre_bouton: str, key_prefix: str) -> Optional[DepotsCl
         )
     else:
         st.error(
-            "Aucune clôture de solde n'a été trouvée dans SOLDE_ARRETE. "
+            "Aucune clôture de solde n'a été trouvée. "
             "Cette extraction ne peut pas être calculée pour le moment."
         )
         date_arrete = st.date_input("Date d'arrêté *", value=dt.date.today(), key=f"{key_prefix}date_arrete")

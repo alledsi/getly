@@ -12,25 +12,78 @@ from __future__ import annotations
 
 import streamlit as st
 
+import auth
+from auth_ui import (
+    afficher_message_en_attente,
+    render_account_page,
+    render_admin_page,
+    render_forced_password_change,
+    render_login,
+)
 from export_excel import build_excel
 from extractions import EXTRACTIONS, get_extraction
 
 st.set_page_config(page_title="Getly", page_icon="📊", layout="wide")
 
+auth.init_db()
+
 
 # ---------------------------------------------------------------------------
-# Barre latérale : identité de l'appli, choix de l'extraction
+# Authentification : bloque tout le reste tant que l'utilisateur n'est pas
+# connecté (et, le cas échéant, tant qu'il n'a pas changé son mot de passe
+# provisoire).
+# ---------------------------------------------------------------------------
+if "user" not in st.session_state:
+    render_login()
+    st.stop()
+
+utilisateur = st.session_state["user"]
+
+# Affiche un éventuel message laissé par l'écran précédent (ex. "utilisateur
+# créé") avant un st.rerun() — sinon le message n'a pas le temps de s'afficher.
+afficher_message_en_attente()
+
+if utilisateur.get("doit_changer_mdp"):
+    render_forced_password_change(utilisateur)
+    st.stop()
+
+
+# ---------------------------------------------------------------------------
+# Barre latérale : identité de l'appli, utilisateur connecté, navigation
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.title("📊 Getly")
     st.caption("Rapports et extractions — ACEP")
 
-    st.subheader("Choisir un rapport")
-    labels = {f"{e.icon}  {e.label}": e.id for e in EXTRACTIONS}
-    choix_label = st.radio(
-        "Choisir un rapport", list(labels.keys()), label_visibility="collapsed"
-    )
-    extraction_id = labels[choix_label]
+    role_libelle = "Administrateur" if utilisateur["role"] == "admin" else "Utilisateur"
+    st.caption(f"Connecté : **{utilisateur['username']}** ({role_libelle})")
+    if st.button("Se déconnecter", width="stretch"):
+        del st.session_state["user"]
+        st.rerun()
+
+    st.divider()
+
+    sections = ["📁 Rapports", "👤 Mon compte"]
+    if utilisateur["role"] == "admin":
+        sections.append("🛠️ Administration")
+    section = st.radio("Navigation", sections, label_visibility="collapsed")
+
+    extraction_id = None
+    if section == "📁 Rapports":
+        st.subheader("Choisir un rapport")
+        labels = {f"{e.icon}  {e.label}": e.id for e in EXTRACTIONS}
+        choix_label = st.radio(
+            "Choisir un rapport", list(labels.keys()), label_visibility="collapsed"
+        )
+        extraction_id = labels[choix_label]
+
+if section == "👤 Mon compte":
+    render_account_page(utilisateur)
+    st.stop()
+
+if section == "🛠️ Administration":
+    render_admin_page(utilisateur)
+    st.stop()
 
 extraction = get_extraction(extraction_id)
 

@@ -362,9 +362,9 @@ class BalanceAgeeExtraction(Extraction):
     id = "balance_agee"
     label = "Balance Agée"
     description = (
-        "Détail des prêts en cours à une date d'arrêté donnée (table ENC_BRUT), "
-        "avec les caractéristiques du prêt, du client, des retards par tranche "
-        "et de la garantie associée."
+        "Détail des prêts en cours à une date d'arrêté donnée, avec les "
+        "caractéristiques du prêt, du client, des retards par tranche et de "
+        "la garantie associée."
     )
     icon = "📋"
 
@@ -388,7 +388,7 @@ class BalanceAgeeExtraction(Extraction):
         except Exception:  # noqa: BLE001
             dates_dispo = []
             st.warning(
-                "Impossible de charger les dates d'arrêté disponibles depuis ENC_BRUT "
+                "Impossible de charger les dates d'arrêté disponibles "
                 "(vérifie que le fichier .env est bien configuré et que le serveur a "
                 "accès à la base)."
             )
@@ -439,7 +439,7 @@ class BalanceAgeeExtraction(Extraction):
             )
         else:
             st.error(
-                "Aucune date d'arrêté trouvée dans ENC_BRUT. Cette extraction ne peut "
+                "Aucune date d'arrêté trouvée. Cette extraction ne peut "
                 "pas être calculée pour le moment."
             )
             date_arrete = None

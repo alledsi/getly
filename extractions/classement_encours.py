@@ -228,7 +228,7 @@ def _render_form_commun(titre_bouton: str, key_prefix: str) -> Optional[Classeme
     except Exception:  # noqa: BLE001
         dates_dispo = []
         st.warning(
-            "Impossible de charger les dates d'arrêté disponibles depuis ENC_BRUT "
+            "Impossible de charger les dates d'arrêté disponibles "
             "(vérifie que le fichier .env est bien configuré et que le serveur a "
             "accès à la base)."
         )
@@ -260,7 +260,7 @@ def _render_form_commun(titre_bouton: str, key_prefix: str) -> Optional[Classeme
         )
     else:
         st.error(
-            "Aucune date d'arrêté trouvée dans ENC_BRUT. Cette extraction ne peut "
+            "Aucune date d'arrêté trouvée. Cette extraction ne peut "
             "pas être calculée pour le moment."
         )
         date_arrete = None
