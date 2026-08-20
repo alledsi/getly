@@ -36,25 +36,14 @@ def get_pool() -> oracledb.ConnectionPool:
     )
 
 
-def test_connection() -> tuple[bool, str]:
-    """Essaie d'ouvrir une connexion, pour un bouton 'Tester la connexion'."""
-    try:
-        pool = get_pool()
-        with pool.acquire() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1 FROM DUAL")
-                cur.fetchone()
-        return True, "Connexion à la base ACEP réussie."
-    except Exception as exc:  # noqa: BLE001
-        return False, f"Échec de connexion : {exc}"
-
-
 def fetch_df(sql: str, params: dict | None = None) -> pd.DataFrame:
-    """Exécute une requête SQL paramétrée et retourne un DataFrame pandas."""
+    """Exécute une requête SQL paramétrée et retourne un DataFrame pandas
+    avec TOUTES les lignes du résultat (pas de plafond)."""
     pool = get_pool()
     with pool.acquire() as conn:
         with conn.cursor() as cur:
+            cur.arraysize = 1000  # réduit le nombre d'allers-retours réseau
             cur.execute(sql, params or {})
             columns = [c[0] for c in cur.description]
-            rows = cur.fetchmany(config.MAX_ROWS)
+            rows = cur.fetchall()
     return pd.DataFrame(rows, columns=columns)

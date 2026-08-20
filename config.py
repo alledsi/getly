@@ -29,8 +29,3 @@ DB_PORT = int(_get_env("DB_PORT", "1521"))
 DB_SID = _get_env("DB_SID", required=True)
 DB_USER = _get_env("DB_USER", required=True)
 DB_PASSWORD = _get_env("DB_PASSWORD", required=True)
-
-# --- Divers ---
-# Nombre max de lignes ramenées par une extraction, pour éviter de
-# surcharger l'application si la période/le filtre est trop large.
-MAX_ROWS = int(_get_env("MAX_ROWS", "50000"))

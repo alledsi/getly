@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import streamlit as st
 
-import db
 from export_excel import build_excel
 from extractions import EXTRACTIONS, get_extraction
 
@@ -20,7 +19,7 @@ st.set_page_config(page_title="Getly", page_icon="📊", layout="wide")
 
 
 # ---------------------------------------------------------------------------
-# Barre latérale : identité de l'appli, choix de l'extraction, connexion
+# Barre latérale : identité de l'appli, choix de l'extraction
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.title("📊 Getly")
@@ -32,16 +31,6 @@ with st.sidebar:
         "Type d'extraction", list(labels.keys()), label_visibility="collapsed"
     )
     extraction_id = labels[choix_label]
-
-    st.divider()
-    st.subheader("Connexion")
-    if st.button("Tester la connexion à la base"):
-        ok, message = db.test_connection()
-        (st.success if ok else st.error)(message)
-    st.caption(
-        "Les paramètres de connexion sont définis dans le fichier .env — "
-        "voir README.md."
-    )
 
 extraction = get_extraction(extraction_id)
 

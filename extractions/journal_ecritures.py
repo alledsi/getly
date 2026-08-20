@@ -2,9 +2,10 @@
 Extraction : Journal des écritures.
 
 Formulaire (code opération, date début, date fin obligatoires ;
-matricule client, n° compte, bureau, agence, mutuelle facultatifs) =>
-journal des écritures comptables du core banking ACEP, avec solde
-cumulé par compte.
+matricule client, n° compte, bureau, agence, mutuelle, sens écriture
+facultatifs) => journal des écritures comptables du core banking ACEP,
+avec solde cumulé par compte. Toutes les lignes correspondantes sont
+retournées, sans plafond.
 """
 
 from __future__ import annotations
@@ -31,9 +32,10 @@ class JournalFilters:
     date_fin: dt.date
     matricule_client: Optional[str] = None
     no_compte: Optional[str] = None
-    nom_bureau: Optional[str] = None
-    nom_agence: Optional[str] = None
-    nom_mutuelle: Optional[str] = None
+    code_bureau: Optional[str] = None
+    code_agence: Optional[str] = None
+    code_mutuelle: Optional[str] = None
+    sens_ecriture: Optional[str] = None
 
     def validate(self) -> Optional[str]:
         if not self.code_operation:
@@ -117,6 +119,24 @@ def get_operations() -> pd.DataFrame:
     return fetch_df(sql)
 
 
+def get_bureaux() -> pd.DataFrame:
+    """Liste des bureaux disponibles (table BUREAU), pour le menu déroulant."""
+    sql = "SELECT CODE_BUREAU, LIBELLE_BUREAU FROM BUREAU ORDER BY LIBELLE_BUREAU"
+    return fetch_df(sql)
+
+
+def get_agences() -> pd.DataFrame:
+    """Liste des agences disponibles (table REGION), pour le menu déroulant."""
+    sql = "SELECT CODE_REGION, LIB_REGION FROM REGION ORDER BY LIB_REGION"
+    return fetch_df(sql)
+
+
+def get_mutuelles() -> pd.DataFrame:
+    """Liste des mutuelles disponibles (table MUTUELLE), pour le menu déroulant."""
+    sql = "SELECT CODE_MUTUELLE, NOM_MUTUELLE FROM MUTUELLE ORDER BY NOM_MUTUELLE"
+    return fetch_df(sql)
+
+
 def get_journal(filters: JournalFilters) -> pd.DataFrame:
     """
     Construit et exécute la requête du journal des écritures selon les
@@ -148,17 +168,21 @@ def get_journal(filters: JournalFilters) -> pd.DataFrame:
         sql += " AND e.NO_COMPTE = :no_compte"
         params["no_compte"] = filters.no_compte.strip()
 
-    if filters.nom_bureau:
-        sql += " AND UPPER(b.LIBELLE_BUREAU) LIKE UPPER(:nom_bureau)"
-        params["nom_bureau"] = f"%{filters.nom_bureau.strip()}%"
+    if filters.code_bureau:
+        sql += " AND b.CODE_BUREAU = :code_bureau"
+        params["code_bureau"] = filters.code_bureau.strip()
 
-    if filters.nom_agence:
-        sql += " AND UPPER(r.LIB_REGION) LIKE UPPER(:nom_agence)"
-        params["nom_agence"] = f"%{filters.nom_agence.strip()}%"
+    if filters.code_agence:
+        sql += " AND r.CODE_REGION = :code_agence"
+        params["code_agence"] = filters.code_agence.strip()
 
-    if filters.nom_mutuelle:
-        sql += " AND UPPER(m.NOM_MUTUELLE) LIKE UPPER(:nom_mutuelle)"
-        params["nom_mutuelle"] = f"%{filters.nom_mutuelle.strip()}%"
+    if filters.code_mutuelle:
+        sql += " AND m.CODE_MUTUELLE = :code_mutuelle"
+        params["code_mutuelle"] = filters.code_mutuelle.strip()
+
+    if filters.sens_ecriture:
+        sql += " AND e.SENS_ECR = :sens_ecriture"
+        params["sens_ecriture"] = filters.sens_ecriture.strip()
 
     sql += _ORDER_SQL
 
@@ -191,13 +215,50 @@ def _enrichir_journal(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Formulaire Streamlit (mise en cache de la liste des opérations)
+# Formulaire Streamlit (mise en cache des listes de référence)
 # ---------------------------------------------------------------------------
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _liste_operations_cached() -> pd.DataFrame:
     return get_operations()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _liste_bureaux_cached() -> pd.DataFrame:
+    return get_bureaux()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _liste_agences_cached() -> pd.DataFrame:
+    return get_agences()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _liste_mutuelles_cached() -> pd.DataFrame:
+    return get_mutuelles()
+
+
+def _select_code_libelle(
+    label: str,
+    df: pd.DataFrame,
+    code_col: str,
+    libelle_col: str,
+    placeholder: str,
+    key: str,
+    max_chars: Optional[int] = None,
+) -> str:
+    """
+    Menu déroulant "CODE — Libellé" construit à partir d'un DataFrame de
+    référence. Si la liste n'a pas pu être chargée, retombe sur un champ
+    texte libre. Retourne le code sélectionné (chaîne vide si aucun choix).
+    """
+    if df.empty:
+        return st.text_input(label, max_chars=max_chars, key=f"{key}_txt") or ""
+
+    options = [f"{getattr(row, code_col)} — {getattr(row, libelle_col)}" for row in df.itertuples()]
+    choix = st.selectbox(label, options=options, index=None, placeholder=placeholder, key=key)
+    return choix.split(" — ")[0] if choix else ""
 
 
 LIBELLES_COLONNES = {
@@ -237,15 +298,32 @@ class JournalEcrituresExtraction(Extraction):
     total_cols = {"DEBIT", "CREDIT"}  # on ne totalise pas le solde (cumul), juste débit/crédit
 
     def render_form(self) -> Optional[JournalFilters]:
+        avertissement = (
+            "Impossible de charger cette liste depuis la base (vérifie que le "
+            "fichier .env est bien configuré et que le serveur a accès à la "
+            "base). Tu peux saisir la valeur manuellement ci-dessous."
+        )
+
         try:
             operations_df = _liste_operations_cached()
         except Exception:  # noqa: BLE001
             operations_df = pd.DataFrame(columns=["CODE_OPER", "LIB_OPER"])
-            st.warning(
-                "Impossible de charger la liste des codes opération depuis la base "
-                "(vérifie la connexion dans la barre latérale). Tu peux saisir le "
-                "code opération manuellement ci-dessous."
-            )
+            st.warning(f"Codes opération : {avertissement}")
+
+        try:
+            bureaux_df = _liste_bureaux_cached()
+        except Exception:  # noqa: BLE001
+            bureaux_df = pd.DataFrame(columns=["CODE_BUREAU", "LIBELLE_BUREAU"])
+
+        try:
+            agences_df = _liste_agences_cached()
+        except Exception:  # noqa: BLE001
+            agences_df = pd.DataFrame(columns=["CODE_REGION", "LIB_REGION"])
+
+        try:
+            mutuelles_df = _liste_mutuelles_cached()
+        except Exception:  # noqa: BLE001
+            mutuelles_df = pd.DataFrame(columns=["CODE_MUTUELLE", "NOM_MUTUELLE"])
 
         with st.form("form_journal_ecritures"):
             st.subheader("Critères de recherche")
@@ -253,20 +331,15 @@ class JournalEcrituresExtraction(Extraction):
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                if not operations_df.empty:
-                    options = [
-                        f"{row.CODE_OPER} — {row.LIB_OPER}"
-                        for row in operations_df.itertuples()
-                    ]
-                    choix = st.selectbox(
-                        "Code opération *",
-                        options=options,
-                        index=None,
-                        placeholder="Sélectionner un code opération",
-                    )
-                    code_operation = choix.split(" — ")[0] if choix else ""
-                else:
-                    code_operation = st.text_input("Code opération *", max_chars=3)
+                code_operation = _select_code_libelle(
+                    "Code opération *",
+                    operations_df,
+                    "CODE_OPER",
+                    "LIB_OPER",
+                    "Sélectionner un code opération",
+                    "code_operation",
+                    max_chars=3,
+                )
 
             with col2:
                 date_debut = st.date_input(
@@ -282,10 +355,24 @@ class JournalEcrituresExtraction(Extraction):
                     matricule_client = st.text_input("Matricule client")
                     no_compte = st.text_input("N° compte")
                 with c2:
-                    nom_bureau = st.text_input("Nom bureau")
-                    nom_agence = st.text_input("Nom agence")
+                    code_bureau = _select_code_libelle(
+                        "Bureau", bureaux_df, "CODE_BUREAU", "LIBELLE_BUREAU", "Tous", "code_bureau"
+                    )
+                    code_agence = _select_code_libelle(
+                        "Agence", agences_df, "CODE_REGION", "LIB_REGION", "Toutes", "code_agence"
+                    )
                 with c3:
-                    nom_mutuelle = st.text_input("Nom mutuelle")
+                    code_mutuelle = _select_code_libelle(
+                        "Mutuelle", mutuelles_df, "CODE_MUTUELLE", "NOM_MUTUELLE", "Toutes", "code_mutuelle"
+                    )
+                    choix_sens = st.selectbox(
+                        "Sens écriture",
+                        options=["D — Débit", "C — Crédit"],
+                        index=None,
+                        placeholder="Tous",
+                        key="sens_ecriture",
+                    )
+                    sens_ecriture = choix_sens.split(" — ")[0] if choix_sens else ""
 
             submitted = st.form_submit_button(
                 "🔍 Générer le journal", width="stretch"
@@ -300,9 +387,10 @@ class JournalEcrituresExtraction(Extraction):
             date_fin=date_fin,
             matricule_client=matricule_client or None,
             no_compte=no_compte or None,
-            nom_bureau=nom_bureau or None,
-            nom_agence=nom_agence or None,
-            nom_mutuelle=nom_mutuelle or None,
+            code_bureau=code_bureau or None,
+            code_agence=code_agence or None,
+            code_mutuelle=code_mutuelle or None,
+            sens_ecriture=sens_ecriture or None,
         )
 
         erreur = filters.validate()
