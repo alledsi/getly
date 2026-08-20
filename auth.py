@@ -2,11 +2,17 @@
 Authentification et administration des utilisateurs de Getly.
 
 Stockage dans une base SQLite locale (`getly_users.db`, à la racine du
-projet, exclue de Git comme `.env`) — indépendante par déploiement (un
-poste ou un serveur donné a ses propres comptes). Les mots de passe ne
-sont jamais stockés en clair : hachage PBKDF2-HMAC-SHA256 avec sel
-aléatoire par utilisateur (bibliothèque standard Python, pas de
-dépendance supplémentaire).
+projet par défaut, exclue de Git comme `.env`) — indépendante par
+déploiement (un poste ou un serveur donné a ses propres comptes). Les
+mots de passe ne sont jamais stockés en clair : hachage
+PBKDF2-HMAC-SHA256 avec sel aléatoire par utilisateur (bibliothèque
+standard Python, pas de dépendance supplémentaire).
+
+L'emplacement du fichier peut être surchargé via la variable d'environnement
+`GETLY_USERS_DB` (dans `.env`) si le dossier du projet n'est pas
+inscriptible par l'utilisateur qui exécute l'application (ex. service
+systemd durci) : mets alors ce chemin vers un dossier accessible en
+écriture, par exemple `/var/lib/getly/getly_users.db`.
 
 Au tout premier lancement (base vide), un compte administrateur par
 défaut est créé automatiquement :
@@ -28,8 +34,12 @@ from contextlib import contextmanager
 from typing import Optional
 
 import pandas as pd
+from dotenv import load_dotenv
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "getly_users.db")
+load_dotenv()  # au cas où auth.py est importé avant config.py
+
+_DEFAULT_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "getly_users.db")
+DB_PATH = os.getenv("GETLY_USERS_DB", _DEFAULT_DB_PATH)
 
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "admin123"
@@ -46,7 +56,20 @@ _PBKDF2_ITERATIONS = 260_000
 
 @contextmanager
 def _connect():
-    conn = sqlite3.connect(DB_PATH)
+    dossier = os.path.dirname(DB_PATH)
+    if dossier and not os.path.isdir(dossier):
+        os.makedirs(dossier, exist_ok=True)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+    except sqlite3.OperationalError as exc:
+        raise sqlite3.OperationalError(
+            f"Impossible d'ouvrir la base des utilisateurs à l'emplacement "
+            f"« {DB_PATH} » ({exc}). Vérifie que l'utilisateur qui exécute "
+            f"l'application a le droit d'écrire dans ce dossier (permissions, "
+            f"ou restrictions systemd comme ProtectHome/ProtectSystem/"
+            f"ReadWritePaths), ou redéfinis l'emplacement via la variable "
+            f"d'environnement GETLY_USERS_DB dans .env."
+        ) from exc
     conn.row_factory = sqlite3.Row
     try:
         yield conn

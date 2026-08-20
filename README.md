@@ -113,6 +113,17 @@ Sur un nouveau déploiement (ex. premier `git pull` sur le serveur), pense
 à te connecter avec `admin` / `admin123`, changer ce mot de passe, puis
 créer les comptes de l'équipe depuis « Administration ».
 
+**Erreur `sqlite3.OperationalError: unable to open database file` :**
+ça signifie que l'utilisateur système qui exécute l'application n'a pas
+le droit d'écrire `getly_users.db` dans le dossier du projet — fréquent
+avec un service systemd durci (`ProtectHome`, `ProtectSystem`,
+`ReadWritePaths`...). Deux façons de corriger :
+- donner à cet utilisateur les droits d'écriture sur le dossier du
+  projet (vérifie avec `systemctl cat getly` quel `User=` est utilisé,
+  et avec `ls -ld` les permissions du dossier) ; ou
+- définir `GETLY_USERS_DB=/chemin/vers/un/dossier/inscriptible/getly_users.db`
+  dans `.env` (voir `.env.example`) pour stocker la base ailleurs.
+
 ## Utilisation
 
 1. Dans la barre latérale, choisis le **type d'extraction**.
