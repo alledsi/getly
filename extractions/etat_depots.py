@@ -29,7 +29,11 @@ import streamlit as st
 
 from db import fetch_df
 from extractions.base import Extraction
-from extractions.reference_data import referentiel_localisation_cached, render_localisation_cascade
+from extractions.reference_data import (
+    derniere_date_arrete_cached,
+    referentiel_localisation_cached,
+    render_localisation_cascade,
+)
 
 # ---------------------------------------------------------------------------
 # Filtres du formulaire
@@ -146,19 +150,6 @@ _COLONNES_FINALES = [
 ]
 
 
-def get_derniere_date_arrete() -> Optional[dt.date]:
-    """Dernière date d'arrêté disponible dans SOLDE_ARRETE (clôture la plus récente)."""
-    df = fetch_df("SELECT MAX(date_arrete) AS DERNIERE_DATE FROM solde_arrete")
-    if df.empty:
-        return None
-    valeur = df.iloc[0]["DERNIERE_DATE"]
-    if pd.isna(valeur):
-        return None
-    if isinstance(valeur, dt.datetime):
-        return valeur.date()
-    return valeur
-
-
 def get_valeurs_compte_general() -> list[str]:
     """Comptes généraux distincts parmi les comptes de dépôts (compte général commençant par '25')."""
     df = fetch_df(
@@ -257,11 +248,6 @@ def get_etat_depots(filters: EtatDepotsFilters) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-@st.cache_data(ttl=900, show_spinner=False)
-def _derniere_date_arrete_cached() -> Optional[dt.date]:
-    return get_derniere_date_arrete()
-
-
 @st.cache_data(ttl=3600, show_spinner=False)
 def _valeurs_compte_general_cached() -> list[str]:
     return get_valeurs_compte_general()
@@ -328,7 +314,7 @@ class EtatDepotsExtraction(Extraction):
 
     def render_form(self) -> Optional[EtatDepotsFilters]:
         try:
-            derniere_cloture = _derniere_date_arrete_cached()
+            derniere_cloture = derniere_date_arrete_cached()
         except Exception:  # noqa: BLE001
             derniere_cloture = None
             st.warning(

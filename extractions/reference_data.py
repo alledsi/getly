@@ -3,16 +3,40 @@ Référentiel partagé Mutuelle -> Agence -> Bureau, et petit utilitaire de
 menu déroulant "CODE — Libellé". Utilisé par plusieurs extractions (ex.
 Journal des écritures, État des dépôts) pour proposer les mêmes filtres
 de localisation en cascade, sans dupliquer la requête ni le widget.
+
+Contient aussi `get_derniere_date_arrete()` (dernière clôture connue dans
+SOLDE_ARRETE), utilisée par toutes les extractions basées sur "dernière
+clôture + mouvements jusqu'à une date choisie" (État des dépôts, Plus
+gros/petits déposants).
 """
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Optional
 
 import pandas as pd
 import streamlit as st
 
 from db import fetch_df
+
+
+def get_derniere_date_arrete() -> Optional[dt.date]:
+    """Dernière date d'arrêté disponible dans SOLDE_ARRETE (clôture la plus récente)."""
+    df = fetch_df("SELECT MAX(date_arrete) AS DERNIERE_DATE FROM solde_arrete")
+    if df.empty:
+        return None
+    valeur = df.iloc[0]["DERNIERE_DATE"]
+    if pd.isna(valeur):
+        return None
+    if isinstance(valeur, dt.datetime):
+        return valeur.date()
+    return valeur
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def derniere_date_arrete_cached() -> Optional[dt.date]:
+    return get_derniere_date_arrete()
 
 
 def get_referentiel_localisation() -> pd.DataFrame:

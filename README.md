@@ -25,6 +25,14 @@ nouvelles facilement.
   quasi nuls → export Excel.
 - ⚠️ **Plus gros contentieux** — mêmes critères, mais sur les clients en
   impayé (PAR 90/180/360), avec les provisions associées → export Excel.
+- 💰 **Plus gros déposants** — même logique de calcul que l'État des
+  dépôts (dernière clôture + mouvements), mais agrégée par client ;
+  date d'arrêté obligatoire (postérieure à la dernière clôture),
+  localisation hiérarchique facultative → top 50 des clients par solde
+  de dépôts cumulé, du plus élevé au plus faible → export Excel.
+- 🪙 **Plus petits déposants** — mêmes critères, classement inversé, avec
+  un plancher de solde (≥ 1000 en valeur absolue) pour exclure les
+  soldes résiduels quasi nuls → export Excel.
 
 ## ⚠️ Important : réseau
 
@@ -89,9 +97,11 @@ getly/
 │   ├── base.py                  # Interface Extraction (contrat commun)
 │   ├── __init__.py              # Registre EXTRACTIONS = [...]
 │   ├── reference_data.py        # Référentiel partagé Mutuelle→Agence→Bureau + menu en cascade
+│   │                             # + dernière date de clôture SOLDE_ARRETE
 │   ├── journal_ecritures.py     # Module : Journal des écritures
 │   ├── etat_depots.py           # Module : État des dépôts
-│   └── classement_encours.py    # Modules : Plus gros/petits consommateurs, Plus gros contentieux
+│   ├── classement_encours.py    # Modules : Plus gros/petits consommateurs, Plus gros contentieux
+│   └── classement_depots.py     # Modules : Plus gros/petits déposants
 ├── requirements.txt
 ├── .env / .env.example
 └── README.md
@@ -157,6 +167,20 @@ en ressources externes, hors pertes) et ne diffèrent que par le seuil
 d'encours, la condition d'impayé et l'ordre du classement (voir le
 docstring de `extractions/classement_encours.py`). Seuls les 50 premiers
 sont retournés dans chaque cas.
+
+## Colonnes des classements de dépôts (Plus gros/petits déposants)
+
+Matricule client, Nom client, Solde cumulé, Code bureau, Bureau, Code
+agence, Agence, Code mutuelle, Mutuelle, Rang.
+
+Même calcul de solde que l'État des dépôts (dernier solde clôturé dans
+`SOLDE_ARRETE` + mouvements de `ECRITURE` jusqu'à la date d'arrêté
+choisie), mais agrégé par client (`MATRICULE_CLIENT`) sur l'ensemble de
+ses comptes de dépôts, puis classé. La date d'arrêté doit être
+postérieure à la dernière clôture disponible (même contrainte que
+l'État des dépôts). Les plus petits déposants sont filtrés à partir
+d'un solde cumulé ≥ 1000 (en valeur absolue), comme pour les classements
+d'encours. Seuls les 50 premiers sont retournés dans chaque cas.
 
 ## ⚠️ Sécurité
 

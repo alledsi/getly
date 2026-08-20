@@ -18,6 +18,10 @@ from extractions.classement_encours import (
     PlusPetitsConsommateursExtraction,
     PlusGrosContentieuxExtraction,
 )
+from extractions.classement_depots import (
+    PlusGrosDeposantsExtraction,
+    PlusPetitsDeposantsExtraction,
+)
 
 EXTRACTIONS: list[Extraction] = [
     JournalEcrituresExtraction(),
@@ -25,6 +29,8 @@ EXTRACTIONS: list[Extraction] = [
     PlusGrosConsommateursExtraction(),
     PlusPetitsConsommateursExtraction(),
     PlusGrosContentieuxExtraction(),
+    PlusGrosDeposantsExtraction(),
+    PlusPetitsDeposantsExtraction(),
     # Ajoute ici les futures extractions, ex. :
     # BalanceComptableExtraction(),
     # GrandLivreExtraction(),
