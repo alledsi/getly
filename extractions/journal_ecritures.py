@@ -288,7 +288,7 @@ class JournalEcrituresExtraction(Extraction):
                     nom_mutuelle = st.text_input("Nom mutuelle")
 
             submitted = st.form_submit_button(
-                "🔍 Générer le journal", use_container_width=True
+                "🔍 Générer le journal", width="stretch"
             )
 
         if not submitted:

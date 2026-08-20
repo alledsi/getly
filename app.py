@@ -101,7 +101,7 @@ if res_key in st.session_state:
 
         st.dataframe(
             df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config=column_config,
         )
@@ -119,5 +119,5 @@ if res_key in st.session_state:
             data=excel_buffer,
             file_name=extraction.excel_filename(filtres_actifs),
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
+            width="stretch",
         )
