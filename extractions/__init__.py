@@ -13,6 +13,7 @@ from typing import Optional
 from extractions.base import Extraction
 from extractions.balance_agee import BalanceAgeeExtraction
 from extractions.journal_ecritures import JournalEcrituresExtraction
+from extractions.recapitulatif_ecritures import RecapitulatifEcrituresExtraction
 from extractions.etat_depots import EtatDepotsExtraction
 from extractions.classement_encours import (
     PlusGrosConsommateursExtraction,
@@ -27,6 +28,7 @@ from extractions.classement_depots import (
 EXTRACTIONS: list[Extraction] = [
     BalanceAgeeExtraction(),
     JournalEcrituresExtraction(),
+    RecapitulatifEcrituresExtraction(),
     EtatDepotsExtraction(),
     PlusGrosConsommateursExtraction(),
     PlusPetitsConsommateursExtraction(),
