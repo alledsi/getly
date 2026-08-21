@@ -74,7 +74,7 @@ DB_PASSWORD=ace
 streamlit run app.py
 ```
 
-L'application s'ouvre dans le navigateur (par défaut http://localhost:8501).
+L'application s'ouvre dans le navigateur (par défaut http://localhost:8888).
 
 ## Authentification
 
@@ -305,7 +305,7 @@ cp .env.example .env
 nano .env                     # renseigne les vraies infos de connexion
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-streamlit run app.py --server.address 0.0.0.0 --server.port 8501
+streamlit run app.py --server.address 0.0.0.0 --server.port 8888
 ```
 
 Au tout premier lancement sur le serveur, `getly_users.db` est créé

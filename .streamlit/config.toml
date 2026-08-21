@@ -1,0 +1,9 @@
+# Configuration Streamlit de Getly.
+# Le port par défaut de l'application est fixé ici (8888) : ainsi
+# `streamlit run app.py` utilise toujours ce port, en local comme sur le
+# serveur, sans avoir besoin de le repréciser à chaque lancement.
+# (Un `--server.port` passé explicitement sur la ligne de commande, par
+# exemple dans le service systemd, reste prioritaire sur cette valeur.)
+
+[server]
+port = 8888
