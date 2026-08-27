@@ -33,6 +33,7 @@ from extractions.reference_data import (
     derniere_date_arrete_cached,
     referentiel_localisation_cached,
     render_localisation_cascade,
+    select_valeur,
 )
 
 # ---------------------------------------------------------------------------
@@ -263,21 +264,6 @@ def _valeurs_status_compte_cached() -> list[str]:
     return get_valeurs_status_compte()
 
 
-def _select_valeur(
-    label: str,
-    valeurs: list[str],
-    placeholder: str,
-    key: str,
-    max_chars: Optional[int] = None,
-) -> str:
-    """Menu déroulant simple (sans libellé) à partir d'une liste de valeurs
-    distinctes. Retombe sur un champ texte libre si la liste est vide."""
-    if not valeurs:
-        return st.text_input(label, max_chars=max_chars, key=f"{key}_txt") or ""
-    choix = st.selectbox(label, options=valeurs, index=None, placeholder=placeholder, key=key)
-    return choix or ""
-
-
 LIBELLES_COLONNES = {
     "CODE_MUTUELLE": "Code mutuelle",
     "NOM_MUTUELLE": "Mutuelle",
@@ -380,16 +366,16 @@ class EtatDepotsExtraction(Extraction):
             c1, c2, c3 = st.columns(3)
             with c1:
                 matricule_client = st.text_input("Matricule client", max_chars=8)
-                compte_general = _select_valeur(
+                compte_general = select_valeur(
                     "Compte général", valeurs_compte_general, "Tous", "compte_general", max_chars=10
                 )
             with c2:
                 no_compte = st.text_input("N° compte", max_chars=12)
-                code_type_compte = _select_valeur(
+                code_type_compte = select_valeur(
                     "Code type compte", valeurs_code_type_compte, "Tous", "code_type_compte", max_chars=3
                 )
             with c3:
-                status_compte = _select_valeur(
+                status_compte = select_valeur(
                     "Statut compte", valeurs_status_compte, "Tous", "status_compte", max_chars=1
                 )
                 exclure_soldes_nuls = st.checkbox("Exclure les comptes à solde nul")

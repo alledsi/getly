@@ -16,11 +16,20 @@ nouvelles facilement.
   début, date fin obligatoires ; matricule client, n° compte, sens
   écriture, et localisation hiérarchique (mutuelle → agence → bureau)
   facultatifs → tableau du journal → export Excel.
+- 🧮 **Récapitulatif des écritures** — date début, date fin obligatoires ;
+  matricule client, n° compte, compte général, et localisation
+  hiérarchique facultatifs → total débit, total crédit et écart
+  (crédit - débit) par type d'opération sur la période → export Excel.
 - 🏦 **État des dépôts** — date d'arrêté obligatoire (dernier solde
   clôturé + mouvements jusqu'à cette date) ; matricule client, compte
   général, n° compte, code type compte, statut compte, exclusion des
   soldes nuls, et localisation hiérarchique facultatifs → tableau des
   soldes débiteurs/créditeurs par compte → export Excel.
+- 🔻 **Comptes débiteurs** — date d'arrêté obligatoire (liste déroulante,
+  dernière disponible par défaut) ; matricule client, code type compte,
+  statut compte, et localisation hiérarchique facultatifs → comptes en
+  position débitrice avec solde débiteur, durée en jours et date
+  d'apurement → export Excel.
 - 📈 **Plus gros consommateurs** — date d'arrêté obligatoire (liste
   déroulante, dernière disponible par défaut) ; localisation hiérarchique
   facultative → top 50 des clients emprunteurs par encours cumulé, comptes
@@ -152,10 +161,13 @@ getly/
 │   ├── base.py                  # Interface Extraction (contrat commun)
 │   ├── __init__.py              # Registre EXTRACTIONS = [...]
 │   ├── reference_data.py        # Référentiel partagé Mutuelle→Agence→Bureau + menu en cascade
-│   │                             # + dernière clôture SOLDE_ARRETE + dates d'arrêté ENC_BRUT
+│   │                             # + dernière clôture SOLDE_ARRETE + dates d'arrêté (ENC_BRUT,
+│   │                             # RPT_COMPTES_DEBITEURS) + menu déroulant de valeurs distinctes
 │   ├── balance_agee.py          # Module : Balance Agée
 │   ├── journal_ecritures.py     # Module : Journal des écritures
+│   ├── recapitulatif_ecritures.py  # Module : Récapitulatif des écritures
 │   ├── etat_depots.py           # Module : État des dépôts
+│   ├── comptes_debiteurs.py     # Module : Comptes débiteurs
 │   ├── classement_encours.py    # Modules : Plus gros/petits consommateurs, Plus gros contentieux
 │   └── classement_depots.py     # Modules : Plus gros/petits déposants
 ├── requirements.txt
@@ -218,6 +230,17 @@ le solde comptable total du compte (qui dépend d'écritures antérieures
 non incluses si la période sélectionnée ne remonte pas jusqu'à
 l'ouverture du compte).
 
+## Colonnes du récapitulatif des écritures
+
+Code opération, Type d'opération, Débit, Crédit, Écart (crédit - débit).
+
+Une ligne par type d'opération (regroupement de toutes les écritures de
+la période), avec le total débit, le total crédit et l'écart. Pas de
+colonnes de localisation ici puisque c'est un total global sur la
+période — utilise les filtres facultatifs (matricule client, n° compte,
+compte général, mutuelle/agence/bureau) pour restreindre le périmètre
+avant agrégation.
+
 ## Colonnes de l'état des dépôts
 
 Code mutuelle, Mutuelle, Code agence, Agence, Code bureau, Bureau,
@@ -231,6 +254,18 @@ de `ECRITURE` entre le lendemain de cette clôture et la date d'arrêté
 choisie (incluse). La date d'arrêté demandée doit donc toujours être
 postérieure à la dernière clôture disponible — l'application l'indique
 et bloque sinon.
+
+## Colonnes des comptes débiteurs
+
+Code mutuelle, Mutuelle, Code agence, Agence, Code bureau, Bureau, N°
+compte, Code type compte, Matricule client, Raison sociale, Prénom
+client, Solde débiteur, Date arrêté, Date passage débiteur, Durée
+(jours), Date apurement, Statut compte.
+
+Instantané à la date d'arrêté choisie (liste déroulante des dates
+disponibles). La durée en jours et la date d'apurement (si le compte est
+redevenu créditeur depuis) viennent directement de la table de reporting
+source.
 
 ## Colonnes des classements (Plus gros/petits consommateurs, Plus gros contentieux)
 
@@ -267,10 +302,10 @@ d'encours. Seuls les 50 premiers sont retournés dans chaque cas.
 - Il est fortement recommandé de :
   - créer un compte Oracle dédié, **en lecture seule (SELECT only)** sur
     les tables utilisées (`ECRITURE, COMPTE, CLIENT, BUREAU, REGION,
-    REGION_OPERAT, MUTUELLE, OPERATION, SOLDE_ARRETE, ENC_BRUT, PRET,
-    TYPE_PRET, GARANTIES, TYPE_GARANTIE, SOUS_SECTEUR, SECTEUR,
-    CATEGORIE`, et celles des futures extractions), plutôt que d'utiliser
-    un compte applicatif générique ;
+    REGION_OPERAT, MUTUELLE, OPERATION, SOLDE_ARRETE, ENC_BRUT,
+    RPT_COMPTES_DEBITEURS, PRET, TYPE_PRET, GARANTIES, TYPE_GARANTIE,
+    SOUS_SECTEUR, SECTEUR, CATEGORIE`, et celles des futures extractions),
+    plutôt que d'utiliser un compte applicatif générique ;
   - changer le mot de passe communiqué dans la conversation d'origine,
     puisqu'il a transité en clair.
 - Les extractions ne sont pas plafonnées en nombre de lignes : une
