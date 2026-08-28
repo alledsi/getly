@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from extractions.base import Extraction
+from extractions.clients_actifs import ClientsActifsExtraction
 from extractions.balance_agee import BalanceAgeeExtraction
 from extractions.journal_ecritures import JournalEcrituresExtraction
 from extractions.recapitulatif_ecritures import RecapitulatifEcrituresExtraction
@@ -37,6 +38,7 @@ EXTRACTIONS: list[Extraction] = [
     PlusGrosContentieuxExtraction(),
     PlusGrosDeposantsExtraction(),
     PlusPetitsDeposantsExtraction(),
+    ClientsActifsExtraction(),
     # Ajoute ici les futures extractions, ex. :
     # BalanceComptableExtraction(),
     # GrandLivreExtraction(),

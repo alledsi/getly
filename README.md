@@ -47,6 +47,10 @@ nouvelles facilement.
 - 🪙 **Plus petits déposants** — mêmes critères, classement inversé, avec
   un plancher de solde (≥ 1000 en valeur absolue) pour exclure les
   soldes résiduels quasi nuls → export Excel.
+- 👥 **Clients actifs** — date d'arrêté obligatoire (un client est retenu
+  s'il a adhéré à cette date ou avant) ; genre, type client, secteur
+  d'activité, et localisation hiérarchique facultatifs → liste des
+  clients actifs avec leur localisation → export Excel.
 
 ## ⚠️ Important : réseau
 
@@ -169,7 +173,8 @@ getly/
 │   ├── etat_depots.py           # Module : État des dépôts
 │   ├── comptes_debiteurs.py     # Module : Comptes débiteurs
 │   ├── classement_encours.py    # Modules : Plus gros/petits consommateurs, Plus gros contentieux
-│   └── classement_depots.py     # Modules : Plus gros/petits déposants
+│   ├── classement_depots.py     # Modules : Plus gros/petits déposants
+│   └── clients_actifs.py        # Module : Clients actifs
 ├── requirements.txt
 ├── .env / .env.example
 ├── getly_users.db               # Base des comptes (créée au 1er lancement, exclue de Git)
@@ -293,6 +298,17 @@ postérieure à la dernière clôture disponible (même contrainte que
 l'État des dépôts). Les plus petits déposants sont filtrés à partir
 d'un solde cumulé ≥ 1000 (en valeur absolue), comme pour les classements
 d'encours. Seuls les 50 premiers sont retournés dans chaque cas.
+
+## Colonnes des clients actifs
+
+Code mutuelle, Mutuelle, Code agence, Agence, Code bureau, Bureau,
+Matricule client, Raison sociale, Prénom client, Genre, Type client,
+Secteur, Nombre d'hommes, Nombre de femmes, Date adhésion.
+
+Un client est retenu s'il est actif (`STATUT_CLIENT = 'A'`) et a adhéré
+à la date d'arrêté choisie ou avant. Pas de plafond sur le nombre de
+résultats — filtrer par localisation, genre, type client ou secteur si
+le volume est trop important.
 
 ## ⚠️ Sécurité
 
