@@ -10,10 +10,17 @@ puis agrégé (somme) par client à la date d'arrêté choisie.
 Les deux extractions ne diffèrent que par :
   - l'ordre du classement (décroissant pour les gros déposants, croissant
     pour les petits) ;
-  - le seuil sur le solde cumulé (> 0 pour les gros, >= 1000 en valeur
-    absolue pour les petits, afin d'exclure les soldes résiduels quasi
-    nuls du classement — même convention que
-    `extractions/classement_encours.py`).
+  - le seuil sur le solde cumulé (> 0 pour les gros, >= 1000 pour les
+    petits, afin d'exclure les soldes résiduels quasi nuls du
+    classement — même convention que `extractions/classement_encours.py`).
+
+Le seuil s'applique sur le solde cumulé PAR CLIENT (après agrégation de
+tous ses comptes de dépôts), pas compte par compte, et sans valeur
+absolue : un client dont le cumul est négatif (en position débitrice
+nette sur ses comptes de "dépôts") est exclu des deux classements plutôt
+que de remonter en tête des "petits déposants" — ce n'est pas un
+déposant, quel que soit le montant. (Un tel cas, s'il existe, relève
+plutôt de l'extraction Comptes débiteurs.)
 
 Champ obligatoire : date d'arrêté (liste déroulante des dates
 disponibles dans RPT_ETAT_DEPOTS, la plus récente par défaut). Seul
@@ -81,7 +88,6 @@ def _build_sql(ordre: str, seuil_operateur: str, seuil_valeur: int, filtres_loca
             LEFT JOIN MUTUELLE mut ON mut.CODE_MUTUELLE = d.CODE_MUTUELLE
             WHERE d.DATE_ARRETE = :date_arrete
               AND d.MATRICULE_CLIENT IS NOT NULL
-              AND ABS(NVL(d.SLD_CREDITEUR, 0) - NVL(d.SLD_DEBITEUR, 0)) {seuil_operateur} {seuil_valeur}
               {filtres_localisation}
         ),
         client_agg AS (
@@ -97,6 +103,7 @@ def _build_sql(ordre: str, seuil_operateur: str, seuil_valeur: int, filtres_loca
                 MAX(nom_mutuelle)  AS nom_mutuelle
             FROM compte_solde
             GROUP BY matricule_client
+            HAVING SUM(solde_net) {seuil_operateur} {seuil_valeur}
         ),
         client_rank AS (
             SELECT
