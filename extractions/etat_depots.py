@@ -1,16 +1,13 @@
 """
 Extraction : État des dépôts.
 
-Situation des soldes de dépôts (comptes dont le compte général commence
-par "25") à une date d'arrêté choisie par l'utilisateur :
+Situation des soldes de dépôts à une date d'arrêté choisie, à partir de
+la table de reporting RPT_ETAT_DEPOTS (déjà pré-calculée en base, une
+ligne par compte de dépôt et par date d'arrêté).
 
-  solde à la date d'arrêté = dernier solde clôturé connu (table
-  SOLDE_ARRETE, sa date d'arrêté la plus récente) + mouvements de
-  l'ECRITURE entre le lendemain de cette clôture et la date d'arrêté
-  choisie (incluse).
-
-Champ obligatoire : date d'arrêté (doit être postérieure à la dernière
-clôture connue). Filtres facultatifs, en deux groupes :
+Champ obligatoire : date d'arrêté (liste déroulante des dates
+disponibles, la plus récente par défaut). Filtres facultatifs, en deux
+groupes :
   - identification du compte : matricule client, compte général,
     n° compte, code type compte, statut compte, et une case pour exclure
     les comptes à solde nul (débiteur et créditeur tous deux à 0)
@@ -30,7 +27,7 @@ import streamlit as st
 from db import fetch_df
 from extractions.base import Extraction
 from extractions.reference_data import (
-    derniere_date_arrete_cached,
+    dates_arrete_etat_depots_cached,
     referentiel_localisation_cached,
     render_localisation_cascade,
     select_valeur,
@@ -43,8 +40,7 @@ from extractions.reference_data import (
 
 @dataclass
 class EtatDepotsFilters:
-    date_arrete: dt.date
-    derniere_cloture: Optional[dt.date]  # dernière date_arrete trouvée dans SOLDE_ARRETE
+    date_arrete: Optional[dt.date]
     matricule_client: Optional[str] = None
     compte_general: Optional[str] = None
     no_compte: Optional[str] = None
@@ -58,16 +54,6 @@ class EtatDepotsFilters:
     def validate(self) -> Optional[str]:
         if not self.date_arrete:
             return "La date d'arrêté est obligatoire."
-        if self.derniere_cloture is None:
-            return (
-                "Aucune clôture de solde n'a été trouvée : "
-                "impossible de calculer l'état des dépôts."
-            )
-        if self.date_arrete <= self.derniere_cloture:
-            return (
-                "La date d'arrêté doit être postérieure à la dernière clôture "
-                f"disponible ({self.derniere_cloture:%d/%m/%Y})."
-            )
         return None
 
 
@@ -76,60 +62,31 @@ class EtatDepotsFilters:
 # ---------------------------------------------------------------------------
 
 _BASE_SQL = """
-    WITH solde_base AS (
-        SELECT s.no_compte, s.solde_cloture
-        FROM solde_arrete s
-        WHERE s.date_arrete = (SELECT MAX(date_arrete) FROM solde_arrete)
-    ),
-    mouvements AS (
-        SELECT
-            e.no_compte,
-            SUM(CASE WHEN e.sens_ecr = 'C' THEN e.mt_ecr ELSE 0 END)
-          - SUM(CASE WHEN e.sens_ecr = 'D' THEN e.mt_ecr ELSE 0 END) AS mvt_net
-        FROM ecriture e
-        WHERE e.d_ecr >= :date_debut_mouvements
-          AND e.d_ecr <  :date_fin_mouvements_exclusive
-        GROUP BY e.no_compte
-    ),
-    etat AS (
-        SELECT
-            mut.CODE_MUTUELLE                                        AS CODE_MUTUELLE,
-            mut.NOM_MUTUELLE                                         AS NOM_MUTUELLE,
-            r.CODE_REGION                                            AS CODE_AGENCE,
-            r.LIB_REGION                                             AS NOM_AGENCE,
-            c.CODE_BUREAU                                            AS CODE_BUREAU,
-            b.LIBELLE_BUREAU                                         AS NOM_BUREAU,
-            c.COMPTE_GENERAL                                         AS COMPTE_GENERAL,
-            c.NO_COMPTE                                              AS NUMERO_COMPTE,
-            c.CODE_TYPE_CPT                                          AS CODE_TYPE_COMPTE,
-            c.MATRICULE_CLIENT                                       AS MATRICULE_CLIENT,
-            cl.RAISON_SOCIALE_CLIENT                                 AS RAISON_SOCIALE_CLIENT,
-            cl.PRENOM_CLIENT                                         AS PRENOM_CLIENT,
-            CASE WHEN (NVL(sb.solde_cloture, 0) + NVL(mv.mvt_net, 0)) < 0
-                 THEN ABS(NVL(sb.solde_cloture, 0) + NVL(mv.mvt_net, 0))
-                 ELSE 0
-            END                                                       AS SLD_DEBITEUR,
-            CASE WHEN (NVL(sb.solde_cloture, 0) + NVL(mv.mvt_net, 0)) >= 0
-                 THEN (NVL(sb.solde_cloture, 0) + NVL(mv.mvt_net, 0))
-                 ELSE 0
-            END                                                       AS SLD_CREDITEUR,
-            :date_arrete_choisie                                     AS DATE_ARRETE,
-            c.STATUS_COMPTE                                          AS STATUS_COMPTE
-        FROM COMPTE c
-        JOIN BUREAU b          ON b.CODE_BUREAU = c.CODE_BUREAU
-        JOIN REGION r          ON r.CODE_REGION = b.CODE_REGION
-        LEFT JOIN MUTUELLE mut ON mut.CODE_MUTUELLE = r.CODE_MUTUELLE
-        LEFT JOIN CLIENT cl    ON cl.MATRICULE_CLIENT = c.MATRICULE_CLIENT
-        LEFT JOIN solde_base sb ON sb.no_compte = c.NO_COMPTE
-        LEFT JOIN mouvements  mv ON mv.no_compte = c.NO_COMPTE
-        WHERE c.COMPTE_GENERAL LIKE '25%'
-    )
-    SELECT *
-    FROM etat
-    WHERE 1 = 1
+    SELECT
+        d.CODE_MUTUELLE          AS CODE_MUTUELLE,
+        mut.NOM_MUTUELLE         AS NOM_MUTUELLE,
+        d.CODE_AGENCE            AS CODE_AGENCE,
+        r.LIB_REGION             AS NOM_AGENCE,
+        d.CODE_BUREAU            AS CODE_BUREAU,
+        b.LIBELLE_BUREAU         AS NOM_BUREAU,
+        d.COMPTE_GENERAL         AS COMPTE_GENERAL,
+        d.NUMERO_COMPTE          AS NUMERO_COMPTE,
+        d.CODE_TYPE_COMPTE       AS CODE_TYPE_COMPTE,
+        d.MATRICULE_CLIENT       AS MATRICULE_CLIENT,
+        d.RAISON_SOCIALE_CLIENT  AS RAISON_SOCIALE_CLIENT,
+        d.PRENOM_CLIENT          AS PRENOM_CLIENT,
+        d.SLD_DEBITEUR           AS SLD_DEBITEUR,
+        d.SLD_CREDITEUR          AS SLD_CREDITEUR,
+        d.DATE_ARRETE            AS DATE_ARRETE,
+        d.STATUS_COMPTE          AS STATUS_COMPTE
+    FROM RPT_ETAT_DEPOTS d
+    JOIN BUREAU   b   ON b.CODE_BUREAU = d.CODE_BUREAU
+    JOIN REGION   r   ON r.CODE_REGION = d.CODE_AGENCE
+    LEFT JOIN MUTUELLE mut ON mut.CODE_MUTUELLE = d.CODE_MUTUELLE
+    WHERE d.DATE_ARRETE = :date_arrete
 """
 
-_ORDER_SQL = " ORDER BY CODE_AGENCE, CODE_BUREAU, NUMERO_COMPTE"
+_ORDER_SQL = " ORDER BY d.CODE_AGENCE, d.CODE_BUREAU, d.NUMERO_COMPTE"
 
 _COLONNES_FINALES = [
     "CODE_MUTUELLE",
@@ -152,89 +109,74 @@ _COLONNES_FINALES = [
 
 
 def get_valeurs_compte_general() -> list[str]:
-    """Comptes généraux distincts parmi les comptes de dépôts (compte général commençant par '25')."""
-    df = fetch_df(
-        "SELECT DISTINCT COMPTE_GENERAL FROM COMPTE "
-        "WHERE COMPTE_GENERAL LIKE '25%' ORDER BY COMPTE_GENERAL"
-    )
+    """Comptes généraux distincts présents dans RPT_ETAT_DEPOTS."""
+    df = fetch_df("SELECT DISTINCT COMPTE_GENERAL FROM RPT_ETAT_DEPOTS ORDER BY COMPTE_GENERAL")
     return df["COMPTE_GENERAL"].dropna().tolist()
 
 
 def get_valeurs_code_type_compte() -> list[str]:
-    """Codes type de compte distincts parmi les comptes de dépôts."""
+    """Codes type de compte distincts présents dans RPT_ETAT_DEPOTS."""
     df = fetch_df(
-        "SELECT DISTINCT CODE_TYPE_CPT FROM COMPTE "
-        "WHERE COMPTE_GENERAL LIKE '25%' AND CODE_TYPE_CPT IS NOT NULL "
-        "ORDER BY CODE_TYPE_CPT"
+        "SELECT DISTINCT CODE_TYPE_COMPTE FROM RPT_ETAT_DEPOTS "
+        "WHERE CODE_TYPE_COMPTE IS NOT NULL ORDER BY CODE_TYPE_COMPTE"
     )
-    return df["CODE_TYPE_CPT"].dropna().tolist()
+    return df["CODE_TYPE_COMPTE"].dropna().tolist()
 
 
 def get_valeurs_status_compte() -> list[str]:
-    """Statuts de compte distincts parmi les comptes de dépôts."""
+    """Statuts de compte distincts présents dans RPT_ETAT_DEPOTS."""
     df = fetch_df(
-        "SELECT DISTINCT STATUS_COMPTE FROM COMPTE "
-        "WHERE COMPTE_GENERAL LIKE '25%' AND STATUS_COMPTE IS NOT NULL "
-        "ORDER BY STATUS_COMPTE"
+        "SELECT DISTINCT STATUS_COMPTE FROM RPT_ETAT_DEPOTS "
+        "WHERE STATUS_COMPTE IS NOT NULL ORDER BY STATUS_COMPTE"
     )
     return df["STATUS_COMPTE"].dropna().tolist()
 
 
 def get_etat_depots(filters: EtatDepotsFilters) -> pd.DataFrame:
-    """
-    Construit et exécute la requête de l'état des dépôts : dernier solde
-    clôturé + mouvements du lendemain de cette clôture jusqu'à la date
-    d'arrêté choisie (incluse), pour les comptes de dépôts (compte
-    général commençant par "25").
-    """
+    """Construit et exécute la requête de l'état des dépôts à la date d'arrêté choisie."""
     error = filters.validate()
     if error:
         raise ValueError(error)
 
     sql = _BASE_SQL
-    date_debut_mouvements = filters.derniere_cloture + dt.timedelta(days=1)
     params: dict = {
-        "date_debut_mouvements": dt.datetime.combine(date_debut_mouvements, dt.time.min),
-        "date_fin_mouvements_exclusive": dt.datetime.combine(
-            filters.date_arrete + dt.timedelta(days=1), dt.time.min
-        ),
-        "date_arrete_choisie": dt.datetime.combine(filters.date_arrete, dt.time.min),
+        "date_arrete": dt.datetime.combine(filters.date_arrete, dt.time.min),
     }
 
     if filters.matricule_client:
-        sql += " AND MATRICULE_CLIENT = :matricule_client"
+        sql += " AND d.MATRICULE_CLIENT = :matricule_client"
         params["matricule_client"] = filters.matricule_client.strip()
 
     if filters.compte_general:
-        sql += " AND COMPTE_GENERAL = :compte_general"
+        sql += " AND d.COMPTE_GENERAL = :compte_general"
         params["compte_general"] = filters.compte_general.strip()
 
     if filters.no_compte:
-        sql += " AND NUMERO_COMPTE = :no_compte"
+        sql += " AND d.NUMERO_COMPTE = :no_compte"
         params["no_compte"] = filters.no_compte.strip()
 
     if filters.code_type_compte:
-        sql += " AND CODE_TYPE_COMPTE = :code_type_compte"
+        sql += " AND d.CODE_TYPE_COMPTE = :code_type_compte"
         params["code_type_compte"] = filters.code_type_compte.strip()
 
     if filters.status_compte:
-        sql += " AND STATUS_COMPTE = :status_compte"
+        sql += " AND d.STATUS_COMPTE = :status_compte"
         params["status_compte"] = filters.status_compte.strip()
 
     if filters.code_mutuelle:
-        sql += " AND CODE_MUTUELLE = :code_mutuelle"
+        sql += " AND d.CODE_MUTUELLE = :code_mutuelle"
         params["code_mutuelle"] = filters.code_mutuelle.strip()
 
     if filters.code_agence:
-        sql += " AND CODE_AGENCE = :code_agence"
+        sql += " AND d.CODE_AGENCE = :code_agence"
         params["code_agence"] = filters.code_agence.strip()
 
     if filters.code_bureau:
-        sql += " AND CODE_BUREAU = :code_bureau"
+        sql += " AND d.CODE_BUREAU = :code_bureau"
         params["code_bureau"] = filters.code_bureau.strip()
 
     if filters.exclure_soldes_nuls:
-        sql += " AND NOT (SLD_DEBITEUR = 0 AND SLD_CREDITEUR = 0)"
+        sql += " AND NOT (d.SLD_DEBITEUR = 0 AND d.SLD_CREDITEUR = 0)"
 
     sql += _ORDER_SQL
 
@@ -287,10 +229,7 @@ LIBELLES_COLONNES = {
 class EtatDepotsExtraction(Extraction):
     id = "etat_depots"
     label = "État des dépôts"
-    description = (
-        "Situation des soldes de dépôts par compte à une date d'arrêté : dernière "
-        "clôture connue + mouvements jusqu'à la date choisie."
-    )
+    description = "Situation des soldes de dépôts par compte à une date d'arrêté donnée."
     icon = "🏦"
 
     column_labels = LIBELLES_COLONNES
@@ -299,12 +238,16 @@ class EtatDepotsExtraction(Extraction):
     total_cols = {"SLD_DEBITEUR", "SLD_CREDITEUR"}
 
     def render_form(self) -> Optional[EtatDepotsFilters]:
+        # NB : pas de st.form ici — les menus Mutuelle/Agence/Bureau sont en
+        # cascade et doivent se recalculer immédiatement quand on change un
+        # choix, ce que st.form empêche (il ne rerun qu'à la soumission).
+
         try:
-            derniere_cloture = derniere_date_arrete_cached()
+            dates_dispo = dates_arrete_etat_depots_cached()
         except Exception:  # noqa: BLE001
-            derniere_cloture = None
+            dates_dispo = []
             st.warning(
-                "Impossible de charger la dernière clôture disponible "
+                "Impossible de charger les dates d'arrêté disponibles "
                 "(vérifie que le fichier .env est bien configuré et que le "
                 "serveur a accès à la base)."
             )
@@ -342,24 +285,19 @@ class EtatDepotsExtraction(Extraction):
 
         st.subheader("Critères de recherche")
 
-        if derniere_cloture is not None:
-            st.caption(
-                f"Dernière clôture des soldes disponible : **{derniere_cloture:%d/%m/%Y}**. "
-                f"Les mouvements sont comptés à partir du "
-                f"**{derniere_cloture + dt.timedelta(days=1):%d/%m/%Y}** jusqu'à la date "
-                f"d'arrêté choisie ci-dessous."
-            )
-            date_arrete = st.date_input(
+        if dates_dispo:
+            date_arrete = st.selectbox(
                 "Date d'arrêté *",
-                value=derniere_cloture + dt.timedelta(days=1),
-                min_value=derniere_cloture + dt.timedelta(days=1),
+                options=dates_dispo,
+                index=0,  # la plus récente (liste triée du plus récent au plus ancien)
+                format_func=lambda d: d.strftime("%d/%m/%Y"),
             )
         else:
             st.error(
-                "Aucune clôture de solde n'a été trouvée. "
-                "Cette extraction ne peut pas être calculée pour le moment."
+                "Aucune date d'arrêté trouvée. Cette extraction ne peut pas "
+                "être calculée pour le moment."
             )
-            date_arrete = st.date_input("Date d'arrêté *", value=dt.date.today())
+            date_arrete = None
 
         with st.expander("Filtres avancés (facultatifs)"):
             st.caption("Identification du compte")
@@ -392,7 +330,6 @@ class EtatDepotsExtraction(Extraction):
 
         filters = EtatDepotsFilters(
             date_arrete=date_arrete,
-            derniere_cloture=derniere_cloture,
             matricule_client=matricule_client or None,
             compte_general=compte_general or None,
             no_compte=no_compte or None,

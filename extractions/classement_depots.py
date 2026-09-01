@@ -2,13 +2,10 @@
 Extractions : Plus gros déposants, Plus petits déposants.
 
 Variantes du même classement (top 50 des clients par solde de dépôts
-cumulé, sur les comptes dont le compte général commence par "25"), basé
-sur le même calcul que l'État des dépôts :
-
-  solde par compte à la date d'arrêté = dernier solde clôturé connu
-  (table SOLDE_ARRETE, sa date d'arrêté la plus récente) + mouvements de
-  l'ECRITURE entre le lendemain de cette clôture et la date d'arrêté
-  choisie (incluse) — puis agrégé (somme) par client.
+cumulé), à partir de la table de reporting RPT_ETAT_DEPOTS (déjà
+pré-calculée en base, une ligne par compte de dépôt et par date
+d'arrêté) — solde net par compte = solde créditeur - solde débiteur,
+puis agrégé (somme) par client à la date d'arrêté choisie.
 
 Les deux extractions ne diffèrent que par :
   - l'ordre du classement (décroissant pour les gros déposants, croissant
@@ -18,8 +15,8 @@ Les deux extractions ne diffèrent que par :
     nuls du classement — même convention que
     `extractions/classement_encours.py`).
 
-Champ obligatoire : date d'arrêté (doit être postérieure à la dernière
-clôture connue dans SOLDE_ARRETE, comme pour l'État des dépôts). Seul
+Champ obligatoire : date d'arrêté (liste déroulante des dates
+disponibles dans RPT_ETAT_DEPOTS, la plus récente par défaut). Seul
 filtre facultatif : localisation hiérarchique (Mutuelle -> Agence ->
 Bureau) — pas de filtre par matricule client/compte ici, puisqu'il s'agit
 d'un classement agrégé par client.
@@ -37,7 +34,7 @@ import streamlit as st
 from db import fetch_df
 from extractions.base import Extraction
 from extractions.reference_data import (
-    derniere_date_arrete_cached,
+    dates_arrete_etat_depots_cached,
     referentiel_localisation_cached,
     render_localisation_cascade,
 )
@@ -50,7 +47,6 @@ from extractions.reference_data import (
 @dataclass
 class DepotsClassementFilters:
     date_arrete: Optional[dt.date]
-    derniere_cloture: Optional[dt.date]  # dernière date_arrete trouvée dans SOLDE_ARRETE
     code_mutuelle: Optional[str] = None
     code_agence: Optional[str] = None
     code_bureau: Optional[str] = None
@@ -58,16 +54,6 @@ class DepotsClassementFilters:
     def validate(self) -> Optional[str]:
         if not self.date_arrete:
             return "La date d'arrêté est obligatoire."
-        if self.derniere_cloture is None:
-            return (
-                "Aucune clôture de solde n'a été trouvée : "
-                "impossible de calculer ce classement."
-            )
-        if self.date_arrete <= self.derniere_cloture:
-            return (
-                "La date d'arrêté doit être postérieure à la dernière clôture "
-                f"disponible ({self.derniere_cloture:%d/%m/%Y})."
-            )
         return None
 
 
@@ -78,45 +64,30 @@ class DepotsClassementFilters:
 
 def _build_sql(ordre: str, seuil_operateur: str, seuil_valeur: int, filtres_localisation: str) -> str:
     return f"""
-        WITH solde_base AS (
-            SELECT s.no_compte, s.solde_cloture
-            FROM solde_arrete s
-            WHERE s.date_arrete = (SELECT MAX(date_arrete) FROM solde_arrete)
-        ),
-        mouvements AS (
+        WITH compte_solde AS (
             SELECT
-                e.no_compte,
-                SUM(CASE WHEN e.sens_ecr = 'C' THEN e.mt_ecr ELSE 0 END)
-              - SUM(CASE WHEN e.sens_ecr = 'D' THEN e.mt_ecr ELSE 0 END) AS mvt_net
-            FROM ecriture e
-            WHERE e.d_ecr >= :date_debut_mouvements
-              AND e.d_ecr <  :date_fin_mouvements_exclusive
-            GROUP BY e.no_compte
-        ),
-        compte_solde AS (
-            SELECT
-                c.MATRICULE_CLIENT                                       AS matricule_client,
-                (NVL(sb.solde_cloture, 0) + NVL(mv.mvt_net, 0))          AS solde_net,
-                mut.CODE_MUTUELLE                                        AS code_mutuelle,
-                mut.NOM_MUTUELLE                                         AS nom_mutuelle,
-                r.CODE_REGION                                            AS code_agence,
-                r.LIB_REGION                                             AS nom_agence,
-                c.CODE_BUREAU                                            AS code_bureau,
-                b.LIBELLE_BUREAU                                         AS nom_bureau
-            FROM COMPTE c
-            JOIN BUREAU b          ON b.CODE_BUREAU = c.CODE_BUREAU
-            JOIN REGION r          ON r.CODE_REGION = b.CODE_REGION
-            LEFT JOIN MUTUELLE mut ON mut.CODE_MUTUELLE = r.CODE_MUTUELLE
-            LEFT JOIN solde_base sb ON sb.no_compte = c.NO_COMPTE
-            LEFT JOIN mouvements  mv ON mv.no_compte = c.NO_COMPTE
-            WHERE c.COMPTE_GENERAL LIKE '25%'
-              AND c.MATRICULE_CLIENT IS NOT NULL
-              AND ABS(NVL(sb.solde_cloture, 0) + NVL(mv.mvt_net, 0)) {seuil_operateur} {seuil_valeur}
+                d.MATRICULE_CLIENT                                        AS matricule_client,
+                d.PRENOM_CLIENT || ' ' || d.RAISON_SOCIALE_CLIENT         AS nom_client,
+                (NVL(d.SLD_CREDITEUR, 0) - NVL(d.SLD_DEBITEUR, 0))        AS solde_net,
+                d.CODE_MUTUELLE                                           AS code_mutuelle,
+                mut.NOM_MUTUELLE                                          AS nom_mutuelle,
+                d.CODE_AGENCE                                             AS code_agence,
+                r.LIB_REGION                                              AS nom_agence,
+                d.CODE_BUREAU                                             AS code_bureau,
+                b.LIBELLE_BUREAU                                          AS nom_bureau
+            FROM RPT_ETAT_DEPOTS d
+            JOIN BUREAU b          ON b.CODE_BUREAU = d.CODE_BUREAU
+            JOIN REGION r          ON r.CODE_REGION = d.CODE_AGENCE
+            LEFT JOIN MUTUELLE mut ON mut.CODE_MUTUELLE = d.CODE_MUTUELLE
+            WHERE d.DATE_ARRETE = :date_arrete
+              AND d.MATRICULE_CLIENT IS NOT NULL
+              AND ABS(NVL(d.SLD_CREDITEUR, 0) - NVL(d.SLD_DEBITEUR, 0)) {seuil_operateur} {seuil_valeur}
               {filtres_localisation}
         ),
         client_agg AS (
             SELECT
                 matricule_client,
+                MAX(nom_client)    AS nom_client,
                 SUM(solde_net)     AS solde_cumule,
                 MAX(code_bureau)   AS code_bureau,
                 MAX(nom_bureau)    AS nom_bureau,
@@ -134,17 +105,16 @@ def _build_sql(ordre: str, seuil_operateur: str, seuil_valeur: int, filtres_loca
             FROM client_agg ca
         )
         SELECT
-            cr.matricule_client,
-            cl.prenom_client || ' ' || cl.raison_sociale_client AS nom_client,
-            cr.solde_cumule,
-            cr.code_bureau, cr.nom_bureau,
-            cr.code_agence, cr.nom_agence,
-            cr.code_mutuelle, cr.nom_mutuelle,
-            cr.rang
-        FROM client_rank cr
-        JOIN client cl ON cl.matricule_client = cr.matricule_client
-        WHERE cr.rang <= 50
-        ORDER BY cr.rang
+            matricule_client,
+            nom_client,
+            solde_cumule,
+            code_bureau, nom_bureau,
+            code_agence, nom_agence,
+            code_mutuelle, nom_mutuelle,
+            rang
+        FROM client_rank
+        WHERE rang <= 50
+        ORDER BY rang
     """
 
 
@@ -174,25 +144,21 @@ def get_classement_depots(
     if error:
         raise ValueError(error)
 
-    date_debut_mouvements = filters.derniere_cloture + dt.timedelta(days=1)
     params: dict = {
-        "date_debut_mouvements": dt.datetime.combine(date_debut_mouvements, dt.time.min),
-        "date_fin_mouvements_exclusive": dt.datetime.combine(
-            filters.date_arrete + dt.timedelta(days=1), dt.time.min
-        ),
+        "date_arrete": dt.datetime.combine(filters.date_arrete, dt.time.min),
     }
 
     filtres_localisation = ""
     if filters.code_mutuelle:
-        filtres_localisation += " AND mut.CODE_MUTUELLE = :code_mutuelle"
+        filtres_localisation += " AND d.CODE_MUTUELLE = :code_mutuelle"
         params["code_mutuelle"] = filters.code_mutuelle.strip()
 
     if filters.code_agence:
-        filtres_localisation += " AND r.CODE_REGION = :code_agence"
+        filtres_localisation += " AND d.CODE_AGENCE = :code_agence"
         params["code_agence"] = filters.code_agence.strip()
 
     if filters.code_bureau:
-        filtres_localisation += " AND c.CODE_BUREAU = :code_bureau"
+        filtres_localisation += " AND d.CODE_BUREAU = :code_bureau"
         params["code_bureau"] = filters.code_bureau.strip()
 
     sql = _build_sql(ordre, seuil_operateur, seuil_valeur, filtres_localisation)
@@ -210,11 +176,11 @@ def get_classement_depots(
 
 def _render_form_commun(titre_bouton: str, key_prefix: str) -> Optional[DepotsClassementFilters]:
     try:
-        derniere_cloture = derniere_date_arrete_cached()
+        dates_dispo = dates_arrete_etat_depots_cached()
     except Exception:  # noqa: BLE001
-        derniere_cloture = None
+        dates_dispo = []
         st.warning(
-            "Impossible de charger la dernière clôture disponible "
+            "Impossible de charger les dates d'arrêté disponibles "
             "(vérifie que le fichier .env est bien configuré et que le "
             "serveur a accès à la base)."
         )
@@ -236,25 +202,20 @@ def _render_form_commun(titre_bouton: str, key_prefix: str) -> Optional[DepotsCl
 
     st.subheader("Critères de recherche")
 
-    if derniere_cloture is not None:
-        st.caption(
-            f"Dernière clôture des soldes disponible : **{derniere_cloture:%d/%m/%Y}**. "
-            f"Les mouvements sont comptés à partir du "
-            f"**{derniere_cloture + dt.timedelta(days=1):%d/%m/%Y}** jusqu'à la date "
-            f"d'arrêté choisie ci-dessous."
-        )
-        date_arrete = st.date_input(
+    if dates_dispo:
+        date_arrete = st.selectbox(
             "Date d'arrêté *",
-            value=derniere_cloture + dt.timedelta(days=1),
-            min_value=derniere_cloture + dt.timedelta(days=1),
+            options=dates_dispo,
+            index=0,  # la plus récente (liste triée du plus récent au plus ancien)
+            format_func=lambda d: d.strftime("%d/%m/%Y"),
             key=f"{key_prefix}date_arrete",
         )
     else:
         st.error(
-            "Aucune clôture de solde n'a été trouvée. "
-            "Cette extraction ne peut pas être calculée pour le moment."
+            "Aucune date d'arrêté trouvée. Cette extraction ne peut pas "
+            "être calculée pour le moment."
         )
-        date_arrete = st.date_input("Date d'arrêté *", value=dt.date.today(), key=f"{key_prefix}date_arrete")
+        date_arrete = None
 
     with st.expander("Filtres avancés (facultatifs)"):
         st.caption("Localisation (Mutuelle → Agence → Bureau)")
@@ -269,7 +230,6 @@ def _render_form_commun(titre_bouton: str, key_prefix: str) -> Optional[DepotsCl
 
     filters = DepotsClassementFilters(
         date_arrete=date_arrete,
-        derniere_cloture=derniere_cloture,
         code_mutuelle=code_mutuelle or None,
         code_agence=code_agence or None,
         code_bureau=code_bureau or None,
@@ -305,8 +265,8 @@ class PlusGrosDeposantsExtraction(Extraction):
     id = "plus_gros_deposants"
     label = "Plus gros déposants"
     description = (
-        "Top 50 des clients par solde de dépôts cumulé (dernière clôture connue "
-        "+ mouvements jusqu'à la date d'arrêté choisie), du plus élevé au plus faible."
+        "Top 50 des clients par solde de dépôts cumulé à une date d'arrêté "
+        "donnée, du plus élevé au plus faible."
     )
     icon = "💰"
 

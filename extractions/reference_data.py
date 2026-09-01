@@ -4,14 +4,18 @@ menu déroulant "CODE — Libellé". Utilisé par plusieurs extractions (ex.
 Journal des écritures, État des dépôts) pour proposer les mêmes filtres
 de localisation en cascade, sans dupliquer la requête ni le widget.
 
-Contient aussi `get_derniere_date_arrete()` (dernière clôture connue dans
-SOLDE_ARRETE), utilisée par toutes les extractions basées sur "dernière
-clôture + mouvements jusqu'à une date choisie" (État des dépôts, Plus
-gros/petits déposants), ainsi que les fonctions "dates d'arrêté
-disponibles" (ENC_BRUT, RPT_COMPTES_DEBITEURS) utilisées par les
-extractions basées sur un instantané à une date choisie (classements
-d'encours, Balance Agée, Comptes débiteurs), et `select_valeur()`, un
-menu déroulant simple à partir d'une liste de valeurs distinctes.
+Contient aussi les fonctions "dates d'arrêté disponibles" (ENC_BRUT,
+RPT_COMPTES_DEBITEURS, RPT_ETAT_DEPOTS) utilisées par les extractions
+basées sur un instantané à une date choisie (classements d'encours,
+Balance Agée, Comptes débiteurs, État des dépôts, Plus gros/petits
+déposants), et `select_valeur()`, un menu déroulant simple à partir
+d'une liste de valeurs distinctes.
+
+`get_derniere_date_arrete()` / `derniere_date_arrete_cached()` (dernière
+clôture connue dans SOLDE_ARRETE) ne sont plus utilisées par aucune
+extraction actuelle (l'État des dépôts et les classements de déposants
+sont passés à un instantané RPT_ETAT_DEPOTS par date d'arrêté, comme les
+autres) mais restent disponibles ici si un futur besoin réapparaît.
 """
 
 from __future__ import annotations
@@ -69,6 +73,16 @@ def get_dates_arrete_comptes_debiteurs() -> list[dt.date]:
 @st.cache_data(ttl=1800, show_spinner=False)
 def dates_arrete_comptes_debiteurs_cached() -> list[dt.date]:
     return get_dates_arrete_comptes_debiteurs()
+
+
+def get_dates_arrete_etat_depots() -> list[dt.date]:
+    """Dates d'arrêté distinctes disponibles dans RPT_ETAT_DEPOTS, la plus récente en premier."""
+    return _get_dates_arrete("rpt_etat_depots")
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def dates_arrete_etat_depots_cached() -> list[dt.date]:
+    return get_dates_arrete_etat_depots()
 
 
 def get_referentiel_localisation() -> pd.DataFrame:

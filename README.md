@@ -20,8 +20,8 @@ nouvelles facilement.
   matricule client, n° compte, compte général, et localisation
   hiérarchique facultatifs → total débit, total crédit et écart
   (crédit - débit) par type d'opération sur la période → export Excel.
-- 🏦 **État des dépôts** — date d'arrêté obligatoire (dernier solde
-  clôturé + mouvements jusqu'à cette date) ; matricule client, compte
+- 🏦 **État des dépôts** — date d'arrêté obligatoire (liste déroulante,
+  dernière disponible par défaut) ; matricule client, compte
   général, n° compte, code type compte, statut compte, exclusion des
   soldes nuls, et localisation hiérarchique facultatifs → tableau des
   soldes débiteurs/créditeurs par compte → export Excel.
@@ -40,10 +40,10 @@ nouvelles facilement.
 - ⚠️ **Plus gros contentieux** — mêmes critères, mais sur les clients en
   impayé (PAR 90/180/360), avec les provisions associées → export Excel.
 - 💰 **Plus gros déposants** — même logique de calcul que l'État des
-  dépôts (dernière clôture + mouvements), mais agrégée par client ;
-  date d'arrêté obligatoire (postérieure à la dernière clôture),
-  localisation hiérarchique facultative → top 50 des clients par solde
-  de dépôts cumulé, du plus élevé au plus faible → export Excel.
+  dépôts, mais agrégée par client ; date d'arrêté obligatoire (liste
+  déroulante, dernière disponible par défaut), localisation
+  hiérarchique facultative → top 50 des clients par solde de dépôts
+  cumulé, du plus élevé au plus faible → export Excel.
 - 🪙 **Plus petits déposants** — mêmes critères, classement inversé, avec
   un plancher de solde (≥ 1000 en valeur absolue) pour exclure les
   soldes résiduels quasi nuls → export Excel.
@@ -165,8 +165,8 @@ getly/
 │   ├── base.py                  # Interface Extraction (contrat commun)
 │   ├── __init__.py              # Registre EXTRACTIONS = [...]
 │   ├── reference_data.py        # Référentiel partagé Mutuelle→Agence→Bureau + menu en cascade
-│   │                             # + dernière clôture SOLDE_ARRETE + dates d'arrêté (ENC_BRUT,
-│   │                             # RPT_COMPTES_DEBITEURS) + menu déroulant de valeurs distinctes
+│   │                             # + dates d'arrêté disponibles (ENC_BRUT, RPT_COMPTES_DEBITEURS,
+│   │                             # RPT_ETAT_DEPOTS) + menu déroulant de valeurs distinctes
 │   ├── balance_agee.py          # Module : Balance Agée
 │   ├── journal_ecritures.py     # Module : Journal des écritures
 │   ├── recapitulatif_ecritures.py  # Module : Récapitulatif des écritures
@@ -252,13 +252,9 @@ Code mutuelle, Mutuelle, Code agence, Agence, Code bureau, Bureau,
 Compte général, N° compte, Code type compte, Matricule client, Solde
 débiteur, Solde créditeur, Date arrêté, Statut compte.
 
-Seuls les comptes de dépôts (compte général commençant par "25") sont
-inclus. Le solde à la date d'arrêté = dernier solde clôturé connu dans
-`SOLDE_ARRETE` (sa date d'arrêté la plus récente) + somme des mouvements
-de `ECRITURE` entre le lendemain de cette clôture et la date d'arrêté
-choisie (incluse). La date d'arrêté demandée doit donc toujours être
-postérieure à la dernière clôture disponible — l'application l'indique
-et bloque sinon.
+Instantané à la date d'arrêté choisie (liste déroulante des dates
+disponibles), directement à partir d'une table de reporting déjà
+pré-calculée en base.
 
 ## Colonnes des comptes débiteurs
 
@@ -290,14 +286,12 @@ sont retournés dans chaque cas.
 Matricule client, Nom client, Solde cumulé, Code bureau, Bureau, Code
 agence, Agence, Code mutuelle, Mutuelle, Rang.
 
-Même calcul de solde que l'État des dépôts (dernier solde clôturé dans
-`SOLDE_ARRETE` + mouvements de `ECRITURE` jusqu'à la date d'arrêté
+Même source que l'État des dépôts (instantané à la date d'arrêté
 choisie), mais agrégé par client (`MATRICULE_CLIENT`) sur l'ensemble de
-ses comptes de dépôts, puis classé. La date d'arrêté doit être
-postérieure à la dernière clôture disponible (même contrainte que
-l'État des dépôts). Les plus petits déposants sont filtrés à partir
-d'un solde cumulé ≥ 1000 (en valeur absolue), comme pour les classements
-d'encours. Seuls les 50 premiers sont retournés dans chaque cas.
+ses comptes de dépôts, puis classé. Les plus petits déposants sont
+filtrés à partir d'un solde cumulé ≥ 1000 (en valeur absolue), comme
+pour les classements d'encours. Seuls les 50 premiers sont retournés
+dans chaque cas.
 
 ## Colonnes des clients actifs
 
@@ -319,8 +313,9 @@ le volume est trop important.
   - créer un compte Oracle dédié, **en lecture seule (SELECT only)** sur
     les tables utilisées (`ECRITURE, COMPTE, CLIENT, BUREAU, REGION,
     REGION_OPERAT, MUTUELLE, OPERATION, SOLDE_ARRETE, ENC_BRUT,
-    RPT_COMPTES_DEBITEURS, PRET, TYPE_PRET, GARANTIES, TYPE_GARANTIE,
-    SOUS_SECTEUR, SECTEUR, CATEGORIE`, et celles des futures extractions),
+    RPT_COMPTES_DEBITEURS, RPT_ETAT_DEPOTS, PRET, TYPE_PRET, GARANTIES,
+    TYPE_GARANTIE, SOUS_SECTEUR, SECTEUR, CATEGORIE`, et celles des futures
+    extractions),
     plutôt que d'utiliser un compte applicatif générique ;
   - changer le mot de passe communiqué dans la conversation d'origine,
     puisqu'il a transité en clair.
