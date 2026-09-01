@@ -5,8 +5,9 @@ gros contentieux.
 Les trois sont des variantes du même classement (top 50 des clients
 emprunteurs par encours de crédit cumulé, à une date d'arrêté choisie,
 table ENC_BRUT), qui ne diffèrent que par :
-  - le seuil sur l'encours (> 0 pour "gros", >= 1000 pour "petits", afin
-    d'exclure les encours résiduels quasi nuls du classement des petits) ;
+  - le seuil sur l'encours cumulé PAR CLIENT, après agrégation de tous
+    ses prêts (> 0 pour "gros", >= 1000 pour "petits", afin d'exclure
+    les encours résiduels quasi nuls du classement des petits) ;
   - la condition sur les impayés (par_90/180/360/720 tous à 0 pour les
     "consommateurs" sains, au moins un des trois premiers buckets > 0
     pour le "contentieux") ;
@@ -129,7 +130,6 @@ def _build_sql(
             LEFT JOIN region   r   ON r.code_region = b.code_region
             LEFT JOIN mutuelle mut ON mut.code_mutuelle = r.code_mutuelle
             WHERE eb.date_arrete = :date_arrete
-              AND ABS(eb.encours_cap) {seuil_operateur} {seuil_valeur}
               AND (eb.enc_perte = 0 OR eb.enc_perte IS NULL)
               AND tp.ressource_aff = 'N'
               AND {condition_par}
@@ -150,6 +150,7 @@ def _build_sql(
                 MAX(nom_mutuelle)  AS nom_mutuelle
             FROM enc_filtre
             GROUP BY matricule_client
+            HAVING SUM(encours_cap) {seuil_operateur} {seuil_valeur}
         ),
         client_rank AS (
             SELECT
