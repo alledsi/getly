@@ -52,20 +52,31 @@ FONT_FAMILY = "system-ui, -apple-system, 'Segoe UI', sans-serif"
 
 _CSS = f"""
 <style>
+div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] {{
+    margin-bottom: 18px;
+}}
 .kpi-card {{
     background: {CARD_BG};
     border: 1px solid {CARD_BORDER};
-    border-radius: 12px;
-    padding: 16px 18px;
+    border-radius: 14px;
+    padding: 18px 20px;
     height: 100%;
+    box-shadow: 0 1px 2px rgba(11,11,11,0.04), 0 6px 16px rgba(11,11,11,0.035);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}}
+.kpi-card:hover {{
+    transform: translateY(-2px);
+    box-shadow: 0 2px 4px rgba(11,11,11,0.06), 0 12px 24px rgba(11,11,11,0.07);
 }}
 .kpi-label {{
-    font-size: 0.78rem;
+    font-size: 0.76rem;
     color: {INK_SECONDARY};
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.02em;
-    margin-bottom: 6px;
+    letter-spacing: 0.03em;
+    margin-bottom: 8px;
+    min-height: 2.1em;
+    line-height: 1.35;
 }}
 .kpi-value {{
     font-size: 1.5rem;
@@ -74,46 +85,103 @@ _CSS = f"""
     line-height: 1.2;
 }}
 .kpi-value.small {{
-    font-size: 1.15rem;
+    font-size: 1.2rem;
 }}
 .hero-card {{
     background: linear-gradient(135deg, {BLUE} 0%, #1c5cab 100%);
-    border-radius: 16px;
-    padding: 28px 32px;
+    border-radius: 18px;
+    padding: 30px 34px;
     color: white;
+    box-shadow: 0 10px 28px rgba(42,120,214,0.28);
 }}
 .hero-label {{
     font-size: 0.85rem;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
-    opacity: 0.85;
-    margin-bottom: 8px;
+    letter-spacing: 0.04em;
+    opacity: 0.88;
+    margin-bottom: 10px;
 }}
 .hero-value {{
     font-size: 2.75rem;
     font-weight: 800;
     line-height: 1;
+    letter-spacing: -0.01em;
 }}
 .hero-sub {{
     font-size: 0.85rem;
-    opacity: 0.85;
-    margin-top: 10px;
+    opacity: 0.88;
+    margin-top: 12px;
 }}
 .hero-card.negative {{
     background: linear-gradient(135deg, {RED} 0%, #a83030 100%);
+    box-shadow: 0 10px 28px rgba(227,73,72,0.28);
 }}
 .section-title {{
-    font-size: 1.0rem;
+    font-size: 1.05rem;
     font-weight: 700;
     color: {INK_PRIMARY};
-    margin: 28px 0 10px 0;
+    margin: 36px 0 16px 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid {GRID};
+    display: flex;
+    align-items: center;
+    gap: 9px;
+}}
+.section-title::before {{
+    content: "";
+    display: inline-block;
+    width: 4px;
+    height: 16px;
+    border-radius: 2px;
+    background: {BLUE};
 }}
 .empty-note {{
     color: {INK_MUTED};
     font-size: 0.85rem;
     font-style: italic;
-    padding: 10px 0;
+    padding: 18px 20px;
+    border: 1px dashed {GRID};
+    border-radius: 12px;
+    background: {CARD_BG};
+    margin-top: 4px;
+}}
+.user-badge {{
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: {CARD_BG};
+    border: 1px solid {CARD_BORDER};
+    border-radius: 999px;
+    padding: 6px 16px 6px 6px;
+    box-shadow: 0 1px 2px rgba(11,11,11,0.04);
+    float: right;
+}}
+.user-badge-avatar {{
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, {BLUE} 0%, #1c5cab 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
+    flex-shrink: 0;
+}}
+.user-badge-text {{
+    line-height: 1.25;
+}}
+.user-badge-name {{
+    font-weight: 600;
+    font-size: 0.82rem;
+    color: {INK_PRIMARY};
+}}
+.user-badge-direction {{
+    font-size: 0.74rem;
+    color: {INK_MUTED};
 }}
 </style>
 """
@@ -180,6 +248,24 @@ def section_title(titre: str) -> None:
 
 def empty_note(texte: str) -> None:
     st.markdown(f'<div class="empty-note">{texte}</div>', unsafe_allow_html=True)
+
+
+def user_badge(nom: str, direction: str | None = None) -> None:
+    """Petit badge d'identité (initiales + nom + direction) à afficher en
+    haut d'un tableau de bord, pour rappeler qui est connecté et avec
+    quels droits."""
+    parts = [p for p in nom.replace(".", " ").replace("_", " ").split() if p]
+    initiales = ("".join(p[0] for p in parts[:2]) or nom[:2]).upper()
+    direction_html = (
+        f'<div class="user-badge-direction">{direction}</div>' if direction else ""
+    )
+    st.markdown(
+        f'<div class="user-badge">'
+        f'<div class="user-badge-avatar">{initiales}</div>'
+        f'<div class="user-badge-text"><div class="user-badge-name">{nom}</div>'
+        f"{direction_html}</div></div>",
+        unsafe_allow_html=True,
+    )
 
 
 # ---------------------------------------------------------------------------

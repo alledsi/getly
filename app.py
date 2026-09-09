@@ -21,6 +21,7 @@ from auth_ui import (
     render_login,
 )
 from dashboards import DASHBOARDS, get_dashboard
+from dashboards import components as c
 from dashboards import data as dashboard_data
 from export_excel import build_excel
 from extractions import EXTRACTIONS, get_extraction
@@ -133,6 +134,8 @@ if section == "📁 Rapports" and not extractions_visibles:
 if section == "📊 Tableaux de bord":
     dashboard = get_dashboard(dashboard_id)
 
+    c.inject_css()
+    c.user_badge(utilisateur["username"], utilisateur.get("direction_nom"))
     st.header(f"{dashboard.icon} {dashboard.label}")
     if dashboard.description:
         st.caption(dashboard.description)
