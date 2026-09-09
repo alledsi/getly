@@ -10,6 +10,8 @@ Lancement :
 
 from __future__ import annotations
 
+import datetime as dt
+
 import streamlit as st
 
 import auth
@@ -159,8 +161,8 @@ if section == "📊 Tableaux de bord":
         )
         st.stop()
 
+    fcol1, fcol2 = st.columns(2)
     if dashboard.filtre_date_arrete:
-        fcol1, fcol2 = st.columns(2)
         with fcol1:
             categorie_choisie = st.selectbox("Catégorie *", options=categories, index=0)
         with fcol2:
@@ -171,8 +173,23 @@ if section == "📊 Tableaux de bord":
                 format_func=lambda d: d.strftime("%d/%m/%Y"),
             )
     else:
-        categorie_choisie = st.selectbox("Catégorie *", options=categories, index=0)
-        date_choisie = dates_dispo[0]
+        # Tableaux de bord "par année" (ex. Encours) : pas de filtre "Date
+        # d'arrêté", remplacé par un filtre "Année" aligné dans la même
+        # ligne. On fait transiter l'année choisie via `date_choisie` (1er
+        # janvier de l'année) plutôt que de changer la signature commune de
+        # `Dashboard.render` — le dashboard n'en récupère que `.year`.
+        annees_dispo = dashboard_data.annees_encours_cached()
+        with fcol1:
+            categorie_choisie = st.selectbox("Catégorie *", options=categories, index=0)
+        with fcol2:
+            if annees_dispo:
+                annee_choisie = st.selectbox("Année *", options=annees_dispo, index=0)
+            else:
+                annee_choisie = dt.date.today().year
+                st.selectbox(
+                    "Année *", options=[annee_choisie], index=0, disabled=True
+                )
+        date_choisie = dt.date(annee_choisie, 1, 1)
 
     st.divider()
     dashboard.render(categorie_choisie, date_choisie)
