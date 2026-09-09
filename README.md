@@ -52,6 +52,66 @@ nouvelles facilement.
   d'activité, et localisation hiérarchique facultatifs → liste des
   clients actifs avec leur localisation → export Excel.
 
+## 📊 Tableaux de bord de pilotage
+
+En plus des extractions, Getly propose une section « 📊 Tableaux de bord »
+(menu latéral) : des rapports visuels (KPIs + graphiques), sans export
+Excel, qui lisent des données déjà agrégées dans deux tables de reporting
+(`RPT_RENTABILITE`, `RPT_ENCOURS`) au lieu de recalculer à partir des
+écritures brutes à chaque affichage.
+
+**Filtres communs à tous les tableaux de bord** (en haut de la page) :
+**Catégorie** (`Consolidé`, ou une mutuelle une fois ses données chargées)
+et **Date d'arrêté** — les deux listes déroulantes se remplissent à partir
+des valeurs distinctes présentes dans `RPT_RENTABILITE` /
+`RPT_ENCOURS`. Si aucune donnée n'est encore chargée pour le mois en
+cours, la page affiche un message et invite à charger la balance
+mensuelle (voir plus bas).
+
+**Les 6 tableaux de bord :**
+
+- 📈 **Rendement du portefeuille** — `(Frais de dossier + Intérêts +
+  Intérêts pénalité + Frais de pénalité) / Encours`, affiché en %. KPIs :
+  chacun des 4 montants + l'Encours. Quand la catégorie choisie est
+  `Consolidé`, un graphique additionnel montre le rendement par mutuelle.
+- 🛡️ **Coût du risque** — `(Provisions + Pertes - Reprises de provisions
+  - Récupération pertes) / Encours`, affiché en %. Mêmes KPIs (Provisions,
+  Pertes, Reprises de provisions, Récupération pertes, Encours) et même
+  graphique par mutuelle en `Consolidé`.
+- 🪪 **Situation des adhésions** — montant du Droit d'adhésion, + graphique
+  par mutuelle en `Consolidé`.
+- 💵 **Situation des revenus** — total = Frais de dossier + Intérêts +
+  Intérêts pénalité + Frais de pénalité + Droit d'adhésion + Reprises de
+  provisions + Récupération pertes + Produits moyens de paiement +
+  Produits prestations services financiers + Autres produits. KPIs :
+  « Revenu du portefeuille » (sous-total des 4 premiers) + chacun des 6
+  autres composants. Graphique de répartition par type de revenu, et
+  graphique par mutuelle en `Consolidé`. **Quand une mutuelle précise est
+  sélectionnée**, un KPI « Charges de groupe rétrocédé » s'ajoute (inclus
+  dans le total ET affiché seul).
+- 🧾 **Situation des charges** — total = Frais de personnel + Provisions +
+  Amortissements + Pertes + Loyers et charges locatives + Impôts et taxes
+  + Charges financières + Autres charges + Charges intérêts épargne. KPIs
+  pour chacun des 9 composants. Graphique de répartition par type de
+  charge, et graphique par mutuelle en `Consolidé`. **Quand une mutuelle
+  précise est sélectionnée**, un KPI « Charges de groupe imputé » s'ajoute
+  (inclus dans le total ET affiché seul).
+- ⚖️ **Résultat** — Total des revenus − Total des charges (mêmes
+  définitions que les deux tableaux de bord précédents, rétrocédé/imputé
+  inclus dès qu'une mutuelle précise est sélectionnée). KPIs : Total des
+  revenus, Total des charges (+ les 2 KPIs rétrocédé/imputé si une
+  mutuelle est sélectionnée). En `Consolidé`, deux graphiques
+  additionnels : Résultat par mutuelle, et Produits/Charges par mutuelle.
+
+**Alimentation des données** : `RPT_RENTABILITE` (rubrique, compte,
+chapitre, solde, catégorie, date d'arrêté) et `RPT_ENCOURS` (catégorie,
+montant, date d'arrêté) sont chargées manuellement chaque fin de mois à
+partir de la balance et de l'encours transmis — voir la procédure
+détaillée dans le journal du projet Claude (ou la compétence enregistrée
+si tu l'as sauvegardée). Tant qu'aucune donnée n'est chargée pour une
+mutuelle donnée, les graphiques « par mutuelle » affichent un message
+d'attente plutôt qu'un graphique vide.
+
 ## ⚠️ Important : réseau
 
 L'application se connecte directement à la base Oracle du core banking
@@ -175,6 +235,17 @@ getly/
 │   ├── classement_encours.py    # Modules : Plus gros/petits consommateurs, Plus gros contentieux
 │   ├── classement_depots.py     # Modules : Plus gros/petits déposants
 │   └── clients_actifs.py        # Module : Clients actifs
+├── dashboards/
+│   ├── base.py                  # Dataclass Dashboard (id, label, icon, render, description)
+│   ├── __init__.py              # Registre DASHBOARDS = [...] (6 tableaux de bord)
+│   ├── data.py                  # Accès RPT_RENTABILITE / RPT_ENCOURS (catégories, dates, totaux par rubrique)
+│   ├── components.py            # Palette, CSS, cartes KPI/hero, graphiques Plotly partagés
+│   ├── rendement_portefeuille.py
+│   ├── cout_du_risque.py
+│   ├── situation_adhesions.py
+│   ├── situation_revenus.py
+│   ├── situation_charges.py
+│   └── resultat.py
 ├── requirements.txt
 ├── .env / .env.example
 ├── getly_users.db               # Base des comptes (créée au 1er lancement, exclue de Git)

@@ -20,6 +20,8 @@ from auth_ui import (
     render_forced_password_change,
     render_login,
 )
+from dashboards import DASHBOARDS, get_dashboard
+from dashboards import data as dashboard_data
 from export_excel import build_excel
 from extractions import EXTRACTIONS, get_extraction
 
@@ -63,7 +65,7 @@ with st.sidebar:
 
     st.divider()
 
-    sections = ["📁 Rapports", "👤 Mon compte"]
+    sections = ["📁 Rapports", "📊 Tableaux de bord", "👤 Mon compte"]
     if utilisateur["role"] == "admin":
         sections.append("🛠️ Administration")
     section = st.radio("Navigation", sections, label_visibility="collapsed")
@@ -77,12 +79,62 @@ with st.sidebar:
         )
         extraction_id = labels[choix_label]
 
+    dashboard_id = None
+    if section == "📊 Tableaux de bord":
+        st.subheader("Choisir un tableau de bord")
+        labels_db = {f"{d.icon}  {d.label}": d.id for d in DASHBOARDS}
+        choix_db = st.radio(
+            "Choisir un tableau de bord", list(labels_db.keys()), label_visibility="collapsed"
+        )
+        dashboard_id = labels_db[choix_db]
+
 if section == "👤 Mon compte":
     render_account_page(utilisateur)
     st.stop()
 
 if section == "🛠️ Administration":
     render_admin_page(utilisateur)
+    st.stop()
+
+if section == "📊 Tableaux de bord":
+    dashboard = get_dashboard(dashboard_id)
+
+    st.header(f"{dashboard.icon} {dashboard.label}")
+    if dashboard.description:
+        st.caption(dashboard.description)
+
+    try:
+        categories = dashboard_data.categories_cached()
+    except Exception as exc:  # noqa: BLE001
+        categories = []
+        st.error(f"Impossible de charger les catégories disponibles : {exc}")
+
+    try:
+        dates_dispo = dashboard_data.dates_arrete_cached()
+    except Exception as exc:  # noqa: BLE001
+        dates_dispo = []
+        st.error(f"Impossible de charger les dates d'arrêté disponibles : {exc}")
+
+    if not categories or not dates_dispo:
+        st.warning(
+            "Aucune donnée disponible pour le moment dans RPT_RENTABILITE / "
+            "RPT_ENCOURS — charge d'abord une balance mensuelle."
+        )
+        st.stop()
+
+    fcol1, fcol2 = st.columns(2)
+    with fcol1:
+        categorie_choisie = st.selectbox("Catégorie *", options=categories, index=0)
+    with fcol2:
+        date_choisie = st.selectbox(
+            "Date d'arrêté *",
+            options=dates_dispo,
+            index=0,
+            format_func=lambda d: d.strftime("%d/%m/%Y"),
+        )
+
+    st.divider()
+    dashboard.render(categorie_choisie, date_choisie)
     st.stop()
 
 extraction = get_extraction(extraction_id)
