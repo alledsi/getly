@@ -406,7 +406,7 @@ _MOIS_ABBR = [
 ]
 
 
-def bar_evolution_mensuelle(
+def line_evolution_mensuelle(
     df: pd.DataFrame,
     date_col: str,
     value_col: str,
@@ -414,26 +414,39 @@ def bar_evolution_mensuelle(
     color: str = BLUE,
     height: int = 360,
 ) -> go.Figure:
-    """Barres verticales, une par mois, triées chronologiquement — pour une
-    évolution sur une année (ex. encours mensuel)."""
+    """Courbe (ligne + points), un point par mois, triée chronologiquement —
+    pour une évolution sur une année (ex. encours mensuel). Aire légèrement
+    remplie sous la courbe, valeur affichée au-dessus de chaque point."""
     d = df.sort_values(date_col)
     labels = [_MOIS_ABBR[pd.Timestamp(v).month - 1] for v in d[date_col]]
     texte = [value_fmt(v) for v in d[value_col]]
     fig = go.Figure(
-        go.Bar(
+        go.Scatter(
             x=labels,
             y=d[value_col],
-            marker=dict(color=color, line=dict(width=0)),
+            mode="lines+markers+text",
+            line=dict(color=color, width=3, shape="spline", smoothing=0.3),
+            marker=dict(color=color, size=8, line=dict(color=SURFACE, width=2)),
+            fill="tozeroy",
+            fillcolor="rgba(42,120,214,0.08)",
             text=texte,
-            textposition="outside",
+            textposition="top center",
+            textfont=dict(color=INK_PRIMARY, size=12),
             cliponaxis=False,
         )
     )
     fig.update_xaxes(showgrid=False, color=INK_PRIMARY)
-    fig.update_yaxes(showgrid=True, gridcolor=GRID, zeroline=True, zerolinecolor=GRID, showticklabels=False)
+    fig.update_yaxes(
+        showgrid=True,
+        gridcolor=GRID,
+        zeroline=True,
+        zerolinecolor=GRID,
+        showticklabels=False,
+        rangemode="tozero",
+    )
     fig.update_layout(
         height=height,
-        margin=dict(l=10, r=10, t=40, b=10),
+        margin=dict(l=10, r=20, t=40, b=10),
         plot_bgcolor=SURFACE,
         paper_bgcolor=SURFACE,
         font=dict(family=FONT_FAMILY, color=INK_SECONDARY, size=13),

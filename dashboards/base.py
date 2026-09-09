@@ -22,3 +22,8 @@ class Dashboard:
     icon: str
     render: Callable[[str, dt.date], None]
     description: str = ""
+    # Certains tableaux de bord (ex. "Encours") ne se lisent pas à une date
+    # d'arrêté précise mais sur une année entière — dans ce cas app.py
+    # masque le filtre "Date d'arrêté" commun et utilise la date la plus
+    # récente disponible comme valeur par défaut passée à `render`.
+    filtre_date_arrete: bool = True

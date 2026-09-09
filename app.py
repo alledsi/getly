@@ -159,16 +159,20 @@ if section == "📊 Tableaux de bord":
         )
         st.stop()
 
-    fcol1, fcol2 = st.columns(2)
-    with fcol1:
+    if dashboard.filtre_date_arrete:
+        fcol1, fcol2 = st.columns(2)
+        with fcol1:
+            categorie_choisie = st.selectbox("Catégorie *", options=categories, index=0)
+        with fcol2:
+            date_choisie = st.selectbox(
+                "Date d'arrêté *",
+                options=dates_dispo,
+                index=0,
+                format_func=lambda d: d.strftime("%d/%m/%Y"),
+            )
+    else:
         categorie_choisie = st.selectbox("Catégorie *", options=categories, index=0)
-    with fcol2:
-        date_choisie = st.selectbox(
-            "Date d'arrêté *",
-            options=dates_dispo,
-            index=0,
-            format_func=lambda d: d.strftime("%d/%m/%Y"),
-        )
+        date_choisie = dates_dispo[0]
 
     st.divider()
     dashboard.render(categorie_choisie, date_choisie)

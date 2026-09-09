@@ -69,6 +69,7 @@ DASHBOARDS: list[Dashboard] = [
         icon="💰",
         render=render_encours,
         description="Évolution mensuelle de l'encours, par année et par catégorie.",
+        filtre_date_arrete=False,
     ),
 ]
 

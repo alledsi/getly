@@ -4,8 +4,11 @@ Tableau de bord : Encours.
 Contrairement aux autres tableaux de bord (photo à une date d'arrêté
 unique), celui-ci trace l'évolution mensuelle de l'encours sur une année.
 Il réutilise le filtre "catégorie" commun à tous les tableaux de bord,
-mais ajoute son propre filtre "année" (la date d'arrêté globale ne sert
-qu'à présélectionner l'année par défaut).
+mais remplace le filtre "date d'arrêté" par son propre filtre "année"
+(dashboards.base.Dashboard.filtre_date_arrete = False pour ce tableau de
+bord — voir dashboards/__init__.py). `date_arrete` reste reçu par
+`render` pour respecter la signature commune, mais sert seulement à
+présélectionner l'année par défaut.
 """
 
 from __future__ import annotations
@@ -52,5 +55,5 @@ def render(categorie: str, date_arrete: dt.date) -> None:
 
     st.write("")
     c.section_title(f"Évolution mensuelle — {annee_choisie}")
-    fig = c.bar_evolution_mensuelle(df, "DATE_ARRETE", "MONTANT")
+    fig = c.line_evolution_mensuelle(df, "DATE_ARRETE", "MONTANT")
     st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
