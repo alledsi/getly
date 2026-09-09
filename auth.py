@@ -21,6 +21,17 @@ défaut est créé automatiquement :
 Ce compte est marqué "doit changer son mot de passe à la prochaine
 connexion" — l'application impose le changement avant de donner accès
 au reste du menu.
+
+Chaque utilisateur peut être rattaché à une **direction** (table
+`directions`, ex. "Contrôle de gestion", "Comptabilité"...), et chaque
+direction se voit attribuer un ensemble de rapports (extractions) et de
+tableaux de bord visibles (table `direction_permissions`). Un
+administrateur voit toujours tout, quelle que soit sa direction. Un
+utilisateur sans direction assignée conserve un accès complet aux
+rapports (comportement historique, pour ne pas casser les déploiements
+existants) mais n'a accès à aucun tableau de bord — cette fonctionnalité
+est nouvelle et réservée par direction dès le départ (voir
+`get_visible_item_ids`).
 """
 
 from __future__ import annotations
@@ -47,6 +58,22 @@ DEFAULT_ADMIN_PASSWORD = "admin123"
 MOT_DE_PASSE_LONGUEUR_MIN = 8
 
 _PBKDF2_ITERATIONS = 260_000
+
+# Identifiants des tableaux de bord (dashboards/__init__.py) accordés par
+# défaut à la direction "Contrôle de gestion" amorcée au premier lancement.
+# À garder synchronisé avec dashboards.DASHBOARDS si de nouveaux tableaux
+# de bord sont ajoutés (une désynchronisation n'est pas dangereuse : elle
+# prive juste le nouveau tableau de bord de son octroi automatique, un
+# administrateur peut toujours l'accorder depuis « Administration »).
+_DASHBOARD_IDS_SEED_CONTROLE_GESTION = [
+    "rendement_portefeuille",
+    "cout_du_risque",
+    "situation_adhesions",
+    "situation_revenus",
+    "situation_charges",
+    "resultat",
+]
+DIRECTION_CONTROLE_GESTION = "Contrôle de gestion"
 
 
 # ---------------------------------------------------------------------------
@@ -79,9 +106,21 @@ def _connect():
 
 
 def init_db() -> None:
-    """Crée la table des utilisateurs si nécessaire, et amorce un compte
-    administrateur par défaut si la base est vide."""
+    """Crée les tables (utilisateurs, directions, permissions) si
+    nécessaire, migre les bases existantes (ajout de `direction_id`),
+    amorce un compte administrateur par défaut si la base est vide, et
+    amorce la direction "Contrôle de gestion" (accès à tous les tableaux
+    de bord) si elle n'existe pas encore."""
     with _connect() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS directions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nom TEXT UNIQUE NOT NULL,
+                cree_le TEXT NOT NULL
+            )
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -93,10 +132,30 @@ def init_db() -> None:
                 role TEXT NOT NULL DEFAULT 'user',
                 actif INTEGER NOT NULL DEFAULT 1,
                 doit_changer_mdp INTEGER NOT NULL DEFAULT 0,
+                direction_id INTEGER REFERENCES directions(id),
                 cree_le TEXT NOT NULL
             )
             """
         )
+        # Migration : les bases créées avant l'ajout de la colonne
+        # direction_id n'ont pas cette colonne — on l'ajoute si besoin.
+        colonnes_users = {
+            row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()
+        }
+        if "direction_id" not in colonnes_users:
+            conn.execute("ALTER TABLE users ADD COLUMN direction_id INTEGER REFERENCES directions(id)")
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS direction_permissions (
+                direction_id INTEGER NOT NULL REFERENCES directions(id) ON DELETE CASCADE,
+                item_type TEXT NOT NULL CHECK (item_type IN ('extraction', 'dashboard')),
+                item_id TEXT NOT NULL,
+                PRIMARY KEY (direction_id, item_type, item_id)
+            )
+            """
+        )
+
         nb = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
         if nb == 0:
             password_hash, password_salt = _hash_password(DEFAULT_ADMIN_PASSWORD)
@@ -113,6 +172,25 @@ def init_db() -> None:
                     password_salt,
                     dt.datetime.now().isoformat(timespec="seconds"),
                 ),
+            )
+
+        # Amorce la direction "Contrôle de gestion" avec accès à tous les
+        # tableaux de bord existants au moment de l'amorçage (l'admin peut
+        # ensuite ajuster librement depuis « Administration »). Ne s'exécute
+        # qu'une fois : si la direction existe déjà, on ne touche à rien
+        # (pour ne pas écraser des permissions que l'admin aurait modifiées).
+        cg = conn.execute(
+            "SELECT id FROM directions WHERE nom = ?", (DIRECTION_CONTROLE_GESTION,)
+        ).fetchone()
+        if cg is None:
+            curseur = conn.execute(
+                "INSERT INTO directions (nom, cree_le) VALUES (?, ?)",
+                (DIRECTION_CONTROLE_GESTION, dt.datetime.now().isoformat(timespec="seconds")),
+            )
+            cg_id = curseur.lastrowid
+            conn.executemany(
+                "INSERT OR IGNORE INTO direction_permissions (direction_id, item_type, item_id) VALUES (?, 'dashboard', ?)",
+                [(cg_id, dashboard_id) for dashboard_id in _DASHBOARD_IDS_SEED_CONTROLE_GESTION],
             )
 
 
@@ -153,7 +231,13 @@ def authentifier(username: str, password: str) -> Optional[dict]:
         return None
     with _connect() as conn:
         row = conn.execute(
-            "SELECT * FROM users WHERE username = ?", (username.strip(),)
+            """
+            SELECT u.*, d.nom AS direction_nom
+            FROM users u
+            LEFT JOIN directions d ON d.id = u.direction_id
+            WHERE u.username = ?
+            """,
+            (username.strip(),),
         ).fetchone()
     if row is None:
         return None
@@ -167,6 +251,8 @@ def authentifier(username: str, password: str) -> Optional[dict]:
         "nom_complet": row["nom_complet"],
         "role": row["role"],
         "doit_changer_mdp": bool(row["doit_changer_mdp"]),
+        "direction_id": row["direction_id"],
+        "direction_nom": row["direction_nom"],
     }
 
 
@@ -197,8 +283,13 @@ def changer_mon_mot_de_passe(user_id: int, ancien_mdp: str, nouveau_mdp: str) ->
 def lister_utilisateurs() -> pd.DataFrame:
     with _connect() as conn:
         df = pd.read_sql_query(
-            "SELECT id, username, nom_complet, role, actif, doit_changer_mdp, cree_le "
-            "FROM users ORDER BY username",
+            """
+            SELECT u.id, u.username, u.nom_complet, u.direction_id, d.nom AS direction_nom,
+                   u.role, u.actif, u.doit_changer_mdp, u.cree_le
+            FROM users u
+            LEFT JOIN directions d ON d.id = u.direction_id
+            ORDER BY u.username
+            """,
             conn,
         )
     return df
@@ -209,6 +300,7 @@ def creer_utilisateur(
     password: str,
     role: str = "user",
     nom_complet: Optional[str] = None,
+    direction_id: Optional[int] = None,
 ) -> tuple[bool, str]:
     username = (username or "").strip()
     if not username:
@@ -225,12 +317,18 @@ def creer_utilisateur(
         ).fetchone()
         if existe:
             return False, f"L'identifiant « {username} » existe déjà."
+        if direction_id is not None:
+            direction_existe = conn.execute(
+                "SELECT 1 FROM directions WHERE id = ?", (direction_id,)
+            ).fetchone()
+            if not direction_existe:
+                return False, "Direction introuvable."
         password_hash, password_salt = _hash_password(password)
         conn.execute(
             """
             INSERT INTO users
-                (username, nom_complet, password_hash, password_salt, role, actif, doit_changer_mdp, cree_le)
-            VALUES (?, ?, ?, ?, ?, 1, 1, ?)
+                (username, nom_complet, password_hash, password_salt, role, actif, doit_changer_mdp, direction_id, cree_le)
+            VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?)
             """,
             (
                 username,
@@ -238,6 +336,7 @@ def creer_utilisateur(
                 password_hash,
                 password_salt,
                 role,
+                direction_id,
                 dt.datetime.now().isoformat(timespec="seconds"),
             ),
         )
@@ -306,3 +405,147 @@ def supprimer_utilisateur(user_id: int) -> tuple[bool, str]:
                 return False, "Impossible : c'est le dernier administrateur actif."
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
     return True, "Utilisateur supprimé."
+
+
+def modifier_direction_utilisateur(user_id: int, direction_id: Optional[int]) -> tuple[bool, str]:
+    """Rattache (ou détache si `direction_id=None`) un utilisateur à une direction."""
+    with _connect() as conn:
+        cible = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if cible is None:
+            return False, "Utilisateur introuvable."
+        if direction_id is not None:
+            direction_existe = conn.execute(
+                "SELECT 1 FROM directions WHERE id = ?", (direction_id,)
+            ).fetchone()
+            if not direction_existe:
+                return False, "Direction introuvable."
+        conn.execute("UPDATE users SET direction_id = ? WHERE id = ?", (direction_id, user_id))
+    return True, "Direction mise à jour."
+
+
+# ---------------------------------------------------------------------------
+# Directions et permissions (rapports/tableaux de bord visibles par direction)
+# ---------------------------------------------------------------------------
+
+
+def lister_directions() -> pd.DataFrame:
+    """Une ligne par direction, avec le nombre d'utilisateurs rattachés."""
+    with _connect() as conn:
+        df = pd.read_sql_query(
+            """
+            SELECT d.id, d.nom, d.cree_le, COUNT(u.id) AS nb_utilisateurs
+            FROM directions d
+            LEFT JOIN users u ON u.direction_id = d.id
+            GROUP BY d.id, d.nom, d.cree_le
+            ORDER BY d.nom
+            """,
+            conn,
+        )
+    return df
+
+
+def creer_direction(nom: str) -> tuple[bool, str]:
+    nom = (nom or "").strip()
+    if not nom:
+        return False, "Le nom de la direction est obligatoire."
+    with _connect() as conn:
+        existe = conn.execute("SELECT 1 FROM directions WHERE nom = ?", (nom,)).fetchone()
+        if existe:
+            return False, f"La direction « {nom} » existe déjà."
+        conn.execute(
+            "INSERT INTO directions (nom, cree_le) VALUES (?, ?)",
+            (nom, dt.datetime.now().isoformat(timespec="seconds")),
+        )
+    return True, f"Direction « {nom} » créée."
+
+
+def renommer_direction(direction_id: int, nouveau_nom: str) -> tuple[bool, str]:
+    nouveau_nom = (nouveau_nom or "").strip()
+    if not nouveau_nom:
+        return False, "Le nom de la direction est obligatoire."
+    with _connect() as conn:
+        cible = conn.execute("SELECT * FROM directions WHERE id = ?", (direction_id,)).fetchone()
+        if cible is None:
+            return False, "Direction introuvable."
+        existe = conn.execute(
+            "SELECT 1 FROM directions WHERE nom = ? AND id != ?", (nouveau_nom, direction_id)
+        ).fetchone()
+        if existe:
+            return False, f"La direction « {nouveau_nom} » existe déjà."
+        conn.execute("UPDATE directions SET nom = ? WHERE id = ?", (nouveau_nom, direction_id))
+    return True, "Direction renommée."
+
+
+def supprimer_direction(direction_id: int) -> tuple[bool, str]:
+    with _connect() as conn:
+        cible = conn.execute("SELECT * FROM directions WHERE id = ?", (direction_id,)).fetchone()
+        if cible is None:
+            return False, "Direction introuvable."
+        nb_utilisateurs = conn.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE direction_id = ?", (direction_id,)
+        ).fetchone()["n"]
+        if nb_utilisateurs > 0:
+            return False, (
+                f"Impossible : {nb_utilisateurs} utilisateur(s) sont encore rattachés à "
+                f"cette direction. Réaffecte-les d'abord (ou détache-les, direction « (Aucune) »)."
+            )
+        conn.execute("DELETE FROM direction_permissions WHERE direction_id = ?", (direction_id,))
+        conn.execute("DELETE FROM directions WHERE id = ?", (direction_id,))
+    return True, "Direction supprimée."
+
+
+def obtenir_permissions_direction(direction_id: int) -> dict[str, set[str]]:
+    """Retourne {'extraction': {id, ...}, 'dashboard': {id, ...}} pour une direction."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT item_type, item_id FROM direction_permissions WHERE direction_id = ?",
+            (direction_id,),
+        ).fetchall()
+    resultat: dict[str, set[str]] = {"extraction": set(), "dashboard": set()}
+    for row in rows:
+        resultat.setdefault(row["item_type"], set()).add(row["item_id"])
+    return resultat
+
+
+def definir_permissions_direction(
+    direction_id: int, item_type: str, item_ids: set[str]
+) -> tuple[bool, str]:
+    """Remplace entièrement les permissions d'un type ('extraction' ou
+    'dashboard') pour une direction par l'ensemble `item_ids` donné."""
+    if item_type not in ("extraction", "dashboard"):
+        return False, "Type de permission invalide."
+    with _connect() as conn:
+        existe = conn.execute("SELECT 1 FROM directions WHERE id = ?", (direction_id,)).fetchone()
+        if not existe:
+            return False, "Direction introuvable."
+        conn.execute(
+            "DELETE FROM direction_permissions WHERE direction_id = ? AND item_type = ?",
+            (direction_id, item_type),
+        )
+        if item_ids:
+            conn.executemany(
+                "INSERT INTO direction_permissions (direction_id, item_type, item_id) VALUES (?, ?, ?)",
+                [(direction_id, item_type, item_id) for item_id in item_ids],
+            )
+    return True, "Permissions enregistrées."
+
+
+def get_visible_item_ids(user: dict, item_type: str) -> Optional[set[str]]:
+    """Ensemble des identifiants (extraction ou tableau de bord) visibles
+    par cet utilisateur pour `item_type` ('extraction' ou 'dashboard').
+
+    Retourne `None` pour signifier « accès à tout » (administrateur, ou —
+    seulement pour item_type='extraction' — utilisateur sans direction
+    assignée, afin de préserver l'accès complet aux rapports des comptes
+    créés avant l'introduction des directions). Un utilisateur sans
+    direction n'a en revanche accès à aucun tableau de bord : cette
+    fonctionnalité est nouvelle et réservée par direction dès le départ.
+    Pour un utilisateur avec direction, retourne l'ensemble (éventuellement
+    vide) explicitement accordé à sa direction."""
+    if user.get("role") == "admin":
+        return None
+    direction_id = user.get("direction_id")
+    if direction_id is None:
+        return None if item_type == "extraction" else set()
+    permissions = obtenir_permissions_direction(direction_id)
+    return permissions.get(item_type, set())

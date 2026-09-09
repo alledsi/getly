@@ -60,6 +60,11 @@ Excel, qui lisent des données déjà agrégées dans deux tables de reporting
 (`RPT_RENTABILITE`, `RPT_ENCOURS`) au lieu de recalculer à partir des
 écritures brutes à chaque affichage.
 
+⚠️ **Accès réservé.** Cette section n'est visible que pour les
+utilisateurs dont la direction y a été autorisée (par défaut, seule
+« Contrôle de gestion ») — voir « Directions et permissions » dans la
+section Authentification ci-dessus.
+
 **Filtres communs à tous les tableaux de bord** (en haut de la page) :
 **Catégorie** (`Consolidé`, ou une mutuelle une fois ses données chargées)
 et **Date d'arrêté** — les deux listes déroulantes se remplissent à partir
@@ -169,14 +174,18 @@ Ce mot de passe provisoire doit être changé dès la première connexion —
 l'application l'impose avant de donner accès au reste du menu.
 
 **Rôles :**
-- *Utilisateur* : accès aux rapports et à « Mon compte » (changer son
-  propre mot de passe).
-- *Administrateur* : accès en plus à « Administration », pour créer des
-  comptes, changer un rôle, activer/désactiver un compte, réinitialiser
-  le mot de passe d'un utilisateur (celui-ci devra alors le changer à sa
-  prochaine connexion), ou supprimer un compte. Le dernier administrateur
-  actif ne peut pas être rétrogradé, désactivé ou supprimé (pour éviter
-  de se retrouver sans accès administrateur).
+- *Utilisateur* : accès aux rapports/tableaux de bord autorisés pour sa
+  direction (voir « Directions et permissions » ci-dessous) et à « Mon
+  compte » (changer son propre mot de passe).
+- *Administrateur* : voit toujours tout (tous les rapports, tous les
+  tableaux de bord, quelle que soit sa direction), et a accès en plus à
+  « Administration », pour créer des comptes, changer un rôle, une
+  direction, activer/désactiver un compte, réinitialiser le mot de passe
+  d'un utilisateur (celui-ci devra alors le changer à sa prochaine
+  connexion), supprimer un compte, gérer les directions, et définir ce
+  que chaque direction peut voir. Le dernier administrateur actif ne peut
+  pas être rétrogradé, désactivé ou supprimé (pour éviter de se retrouver
+  sans accès administrateur).
 
 Tout utilisateur peut changer son propre mot de passe depuis « Mon
 compte » (ancien mot de passe requis). Les mots de passe sont hachés
@@ -185,6 +194,37 @@ compte » (ancien mot de passe requis). Les mots de passe sont hachés
 Sur un nouveau déploiement (ex. premier `git pull` sur le serveur), pense
 à te connecter avec `admin` / `admin123`, changer ce mot de passe, puis
 créer les comptes de l'équipe depuis « Administration ».
+
+### Directions et permissions (rapports / tableaux de bord visibles)
+
+Chaque utilisateur peut être rattaché à une **direction** (colonne
+« Direction », gérée depuis « 🛠️ Administration ») — un regroupement du
+type « Contrôle de gestion », « Comptabilité », « Crédit »... Chaque
+direction a son propre accès, défini une fois pour tous ses membres, dans
+« 🛠️ Administration » → **« 🔐 Permissions par direction »** : une case à
+cocher par rapport (« 📁 Rapports ») et par tableau de bord (« 📊 Tableaux
+de bord »).
+
+Règles d'accès :
+- Un **administrateur** voit toujours tout, quelle que soit sa direction.
+- Un utilisateur **sans direction assignée** garde un accès complet à
+  tous les rapports (comportement historique, pour ne pas casser les
+  comptes déjà créés avant cette fonctionnalité), mais **ne voit aucun
+  tableau de bord** — cette section est nouvelle et réservée par
+  direction dès le départ.
+- Un utilisateur **avec une direction** ne voit que les rapports et
+  tableaux de bord explicitement cochés pour cette direction. Si rien
+  n'est coché pour un type donné, la section correspondante est vide (un
+  message l'indique pour les rapports) ou carrément masquée du menu
+  latéral (cas des tableaux de bord).
+
+Par défaut, au premier lancement, une direction **« Contrôle de
+gestion »** est créée automatiquement avec accès à **tous les tableaux de
+bord** (mais aucun rapport — à accorder si besoin) : c'est la direction à
+assigner aux personnes qui doivent voir les tableaux de bord de pilotage.
+Gérer les directions elles-mêmes (créer, renommer, supprimer — une
+direction encore rattachée à des utilisateurs ne peut pas être
+supprimée) se fait dans « 🛠️ Administration » → « 🏢 Directions ».
 
 **Erreur `sqlite3.OperationalError: unable to open database file` :**
 ça signifie que l'utilisateur système qui exécute l'application n'a pas

@@ -51,6 +51,27 @@ if utilisateur.get("doit_changer_mdp"):
 
 
 # ---------------------------------------------------------------------------
+# Permissions : rapports et tableaux de bord visibles pour cet utilisateur,
+# selon sa direction (voir auth.get_visible_item_ids). Un administrateur
+# voit toujours tout. Un utilisateur sans direction voit tous les rapports
+# (accès historique) mais aucun tableau de bord (fonctionnalité réservée
+# par direction, voir « 🛠️ Administration » → « Permissions par direction »).
+# ---------------------------------------------------------------------------
+extraction_ids_visibles = auth.get_visible_item_ids(utilisateur, "extraction")
+dashboard_ids_visibles = auth.get_visible_item_ids(utilisateur, "dashboard")
+
+extractions_visibles = (
+    EXTRACTIONS
+    if extraction_ids_visibles is None
+    else [e for e in EXTRACTIONS if e.id in extraction_ids_visibles]
+)
+dashboards_visibles = (
+    DASHBOARDS
+    if dashboard_ids_visibles is None
+    else [d for d in DASHBOARDS if d.id in dashboard_ids_visibles]
+)
+
+# ---------------------------------------------------------------------------
 # Barre latérale : identité de l'appli, utilisateur connecté, navigation
 # ---------------------------------------------------------------------------
 with st.sidebar:
@@ -59,30 +80,35 @@ with st.sidebar:
 
     role_libelle = "Administrateur" if utilisateur["role"] == "admin" else "Utilisateur"
     st.caption(f"Connecté : **{utilisateur['username']}** ({role_libelle})")
+    if utilisateur.get("direction_nom"):
+        st.caption(f"Direction : **{utilisateur['direction_nom']}**")
     if st.button("Se déconnecter", width="stretch"):
         del st.session_state["user"]
         st.rerun()
 
     st.divider()
 
-    sections = ["📁 Rapports", "📊 Tableaux de bord", "👤 Mon compte"]
+    sections = ["📁 Rapports"]
+    if dashboards_visibles:
+        sections.append("📊 Tableaux de bord")
+    sections.append("👤 Mon compte")
     if utilisateur["role"] == "admin":
         sections.append("🛠️ Administration")
     section = st.radio("Navigation", sections, label_visibility="collapsed")
 
     extraction_id = None
-    if section == "📁 Rapports":
+    if section == "📁 Rapports" and extractions_visibles:
         st.subheader("Choisir un rapport")
-        labels = {f"{e.icon}  {e.label}": e.id for e in EXTRACTIONS}
+        labels = {f"{e.icon}  {e.label}": e.id for e in extractions_visibles}
         choix_label = st.radio(
             "Choisir un rapport", list(labels.keys()), label_visibility="collapsed"
         )
         extraction_id = labels[choix_label]
 
     dashboard_id = None
-    if section == "📊 Tableaux de bord":
+    if section == "📊 Tableaux de bord" and dashboards_visibles:
         st.subheader("Choisir un tableau de bord")
-        labels_db = {f"{d.icon}  {d.label}": d.id for d in DASHBOARDS}
+        labels_db = {f"{d.icon}  {d.label}": d.id for d in dashboards_visibles}
         choix_db = st.radio(
             "Choisir un tableau de bord", list(labels_db.keys()), label_visibility="collapsed"
         )
@@ -94,6 +120,14 @@ if section == "👤 Mon compte":
 
 if section == "🛠️ Administration":
     render_admin_page(utilisateur)
+    st.stop()
+
+if section == "📁 Rapports" and not extractions_visibles:
+    st.header("📁 Rapports")
+    st.info(
+        "Aucun rapport n'est disponible pour ta direction pour le moment. "
+        "Contacte un administrateur."
+    )
     st.stop()
 
 if section == "📊 Tableaux de bord":

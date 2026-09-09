@@ -9,9 +9,12 @@ from __future__ import annotations
 
 from typing import Optional
 
+import pandas as pd
 import streamlit as st
 
 import auth
+from dashboards import DASHBOARDS
+from extractions import EXTRACTIONS
 
 
 def _programmer_message(kind: str, message: str) -> None:
@@ -84,6 +87,7 @@ def render_account_page(user: dict) -> None:
     if user.get("nom_complet"):
         st.write(f"**Nom :** {user['nom_complet']}")
     st.write(f"**Rôle :** {'Administrateur' if user['role'] == 'admin' else 'Utilisateur'}")
+    st.write(f"**Direction :** {user.get('direction_nom') or '—'}")
 
     st.divider()
     st.subheader("Changer mon mot de passe")
@@ -102,15 +106,26 @@ def render_account_page(user: dict) -> None:
             (st.success if ok else st.error)(message)
 
 
+def _options_direction(directions_df: pd.DataFrame) -> dict[str, Optional[int]]:
+    """{"(Aucune)": None, "Nom direction": id, ...}, trié par nom."""
+    options: dict[str, Optional[int]] = {"(Aucune)": None}
+    for row in directions_df.itertuples():
+        options[row.nom] = int(row.id)
+    return options
+
+
 def render_admin_page(user: dict) -> None:
     st.header("🛠️ Administration des utilisateurs")
 
     df = auth.lister_utilisateurs()
+    directions_df = auth.lister_directions()
+    options_direction = _options_direction(directions_df)
 
     if df.empty:
         st.info("Aucun utilisateur.")
     else:
-        affichage = df.drop(columns=["id"]).copy()
+        affichage = df.drop(columns=["id", "direction_id"]).copy()
+        affichage["direction_nom"] = affichage["direction_nom"].fillna("—")
         affichage["role"] = affichage["role"].map(
             {"admin": "Administrateur", "user": "Utilisateur"}
         )
@@ -120,6 +135,7 @@ def render_admin_page(user: dict) -> None:
             columns={
                 "username": "Identifiant",
                 "nom_complet": "Nom complet",
+                "direction_nom": "Direction",
                 "role": "Rôle",
                 "actif": "Actif",
                 "doit_changer_mdp": "Doit changer son mot de passe",
@@ -140,6 +156,9 @@ def render_admin_page(user: dict) -> None:
                 options=["user", "admin"],
                 format_func=lambda r: "Administrateur" if r == "admin" else "Utilisateur",
             )
+            nouvelle_direction_label = st.selectbox(
+                "Direction", options=list(options_direction.keys())
+            )
         with c2:
             nouveau_nom = st.text_input("Nom complet (facultatif)")
             nouveau_mdp = st.text_input("Mot de passe provisoire", type="password")
@@ -147,7 +166,11 @@ def render_admin_page(user: dict) -> None:
 
     if submitted_creation:
         ok, message = auth.creer_utilisateur(
-            nouvel_identifiant, nouveau_mdp, role=nouveau_role, nom_complet=nouveau_nom
+            nouvel_identifiant,
+            nouveau_mdp,
+            role=nouveau_role,
+            nom_complet=nouveau_nom,
+            direction_id=options_direction[nouvelle_direction_label],
         )
         if ok:
             _programmer_message(
@@ -158,85 +181,247 @@ def render_admin_page(user: dict) -> None:
         else:
             st.error(message)
 
-    if df.empty:
+    if not df.empty:
+        st.divider()
+        st.subheader("Gérer un utilisateur existant")
+
+        options = {
+            f"{row.username} ({'Administrateur' if row.role == 'admin' else 'Utilisateur'})": row.id
+            for row in df.itertuples()
+        }
+        choix = st.selectbox(
+            "Utilisateur", options=list(options.keys()), index=None, placeholder="Choisir un utilisateur"
+        )
+        if choix:
+            cible_id = int(options[choix])
+            cible = df[df["id"] == cible_id].iloc[0]
+            est_soi_meme = cible_id == user["id"]
+
+            if est_soi_meme:
+                st.caption(
+                    "Tu gères ton propre compte ici : utilise plutôt « Mon compte » dans "
+                    "le menu pour changer ton mot de passe. Le rôle, la direction et le "
+                    "statut de ton propre compte ne peuvent pas être modifiés depuis cette page."
+                )
+            else:
+                direction_id_actuel = cible["direction_id"]
+                if pd.isna(direction_id_actuel):
+                    direction_id_actuel = None
+                else:
+                    direction_id_actuel = int(direction_id_actuel)
+                labels_direction = list(options_direction.keys())
+                label_actuel = next(
+                    (l for l, did in options_direction.items() if did == direction_id_actuel),
+                    "(Aucune)",
+                )
+                c_dir1, c_dir2 = st.columns([3, 1])
+                with c_dir1:
+                    nouvelle_direction_cible_label = st.selectbox(
+                        "Direction",
+                        options=labels_direction,
+                        index=labels_direction.index(label_actuel),
+                        key=f"direction_{cible_id}",
+                    )
+                with c_dir2:
+                    st.write("")
+                    st.write("")
+                    if st.button("Mettre à jour", key=f"maj_direction_{cible_id}"):
+                        ok, message = auth.modifier_direction_utilisateur(
+                            cible_id, options_direction[nouvelle_direction_cible_label]
+                        )
+                        if ok:
+                            _programmer_message("success", message)
+                            st.rerun()
+                        else:
+                            st.error(message)
+
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    nouveau_role_cible = st.selectbox(
+                        "Rôle",
+                        options=["user", "admin"],
+                        index=["user", "admin"].index(cible["role"]),
+                        format_func=lambda r: "Administrateur" if r == "admin" else "Utilisateur",
+                        key=f"role_{cible_id}",
+                    )
+                    if st.button("Mettre à jour le rôle", key=f"maj_role_{cible_id}"):
+                        ok, message = auth.modifier_role(cible_id, nouveau_role_cible)
+                        if ok:
+                            _programmer_message("success", message)
+                            st.rerun()
+                        else:
+                            st.error(message)
+                with c2:
+                    est_actif = bool(cible["actif"])
+                    if est_actif:
+                        if st.button("Désactiver ce compte", key=f"desactiver_{cible_id}"):
+                            ok, message = auth.activer_desactiver(cible_id, False)
+                            if ok:
+                                _programmer_message("success", message)
+                                st.rerun()
+                            else:
+                                st.error(message)
+                    else:
+                        if st.button("Réactiver ce compte", key=f"activer_{cible_id}"):
+                            ok, message = auth.activer_desactiver(cible_id, True)
+                            if ok:
+                                _programmer_message("success", message)
+                                st.rerun()
+                            else:
+                                st.error(message)
+                with c3:
+                    if st.button("🗑️ Supprimer ce compte", key=f"supprimer_{cible_id}"):
+                        ok, message = auth.supprimer_utilisateur(cible_id)
+                        if ok:
+                            _programmer_message("success", message)
+                            st.rerun()
+                        else:
+                            st.error(message)
+
+                st.caption(
+                    "Réinitialiser le mot de passe (l'utilisateur devra le changer à sa "
+                    "prochaine connexion) :"
+                )
+                with st.form(f"reset_mdp_form_{cible_id}", clear_on_submit=True):
+                    nouveau_mdp_reset = st.text_input(
+                        "Nouveau mot de passe provisoire", type="password", key=f"reset_mdp_{cible_id}"
+                    )
+                    submitted_reset = st.form_submit_button("Réinitialiser le mot de passe")
+                if submitted_reset:
+                    ok, message = auth.reinitialiser_mot_de_passe(cible_id, nouveau_mdp_reset)
+                    (st.success if ok else st.error)(message)
+
+    _render_directions_section(directions_df)
+    _render_permissions_section(directions_df)
+
+
+def _render_directions_section(directions_df: pd.DataFrame) -> None:
+    st.divider()
+    st.subheader("🏢 Directions")
+    st.caption(
+        "Une direction regroupe des utilisateurs (ex. « Contrôle de gestion », "
+        "« Comptabilité »...). Chaque direction a son propre accès aux rapports "
+        "et tableaux de bord, défini juste en dessous."
+    )
+
+    if directions_df.empty:
+        st.info("Aucune direction créée pour le moment.")
+    else:
+        affichage = directions_df.drop(columns=["id"]).rename(
+            columns={"nom": "Direction", "cree_le": "Créée le", "nb_utilisateurs": "Nb. utilisateurs"}
+        )
+        st.dataframe(affichage, width="stretch", hide_index=True)
+
+    with st.form("creation_direction_form", clear_on_submit=True):
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            nom_direction = st.text_input("Nouvelle direction")
+        with c2:
+            st.write("")
+            st.write("")
+            submitted = st.form_submit_button("Créer", type="primary")
+    if submitted:
+        ok, message = auth.creer_direction(nom_direction)
+        if ok:
+            _programmer_message("success", message)
+            st.rerun()
+        else:
+            st.error(message)
+
+    if directions_df.empty:
         return
 
-    st.divider()
-    st.subheader("Gérer un utilisateur existant")
-
-    options = {
-        f"{row.username} ({'Administrateur' if row.role == 'admin' else 'Utilisateur'})": row.id
-        for row in df.itertuples()
-    }
+    st.caption("Renommer ou supprimer une direction existante :")
+    options = {row.nom: int(row.id) for row in directions_df.itertuples()}
     choix = st.selectbox(
-        "Utilisateur", options=list(options.keys()), index=None, placeholder="Choisir un utilisateur"
+        "Direction", options=list(options.keys()), index=None,
+        placeholder="Choisir une direction", key="gerer_direction_choix",
     )
     if not choix:
         return
+    direction_id = options[choix]
 
-    cible_id = int(options[choix])
-    cible = df[df["id"] == cible_id].iloc[0]
-    est_soi_meme = cible_id == user["id"]
-
-    if est_soi_meme:
-        st.caption(
-            "Tu gères ton propre compte ici : utilise plutôt « Mon compte » dans "
-            "le menu pour changer ton mot de passe. Le rôle et le statut de ton "
-            "propre compte ne peuvent pas être modifiés depuis cette page."
-        )
-    else:
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            nouveau_role_cible = st.selectbox(
-                "Rôle",
-                options=["user", "admin"],
-                index=["user", "admin"].index(cible["role"]),
-                format_func=lambda r: "Administrateur" if r == "admin" else "Utilisateur",
-                key=f"role_{cible_id}",
-            )
-            if st.button("Mettre à jour le rôle", key=f"maj_role_{cible_id}"):
-                ok, message = auth.modifier_role(cible_id, nouveau_role_cible)
-                if ok:
-                    _programmer_message("success", message)
-                    st.rerun()
-                else:
-                    st.error(message)
-        with c2:
-            est_actif = bool(cible["actif"])
-            if est_actif:
-                if st.button("Désactiver ce compte", key=f"desactiver_{cible_id}"):
-                    ok, message = auth.activer_desactiver(cible_id, False)
-                    if ok:
-                        _programmer_message("success", message)
-                        st.rerun()
-                    else:
-                        st.error(message)
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        nouveau_nom = st.text_input("Nouveau nom", value=choix, key=f"renommer_direction_{direction_id}")
+        if st.button("Renommer", key=f"btn_renommer_direction_{direction_id}"):
+            ok, message = auth.renommer_direction(direction_id, nouveau_nom)
+            if ok:
+                _programmer_message("success", message)
+                st.rerun()
             else:
-                if st.button("Réactiver ce compte", key=f"activer_{cible_id}"):
-                    ok, message = auth.activer_desactiver(cible_id, True)
-                    if ok:
-                        _programmer_message("success", message)
-                        st.rerun()
-                    else:
-                        st.error(message)
-        with c3:
-            if st.button("🗑️ Supprimer ce compte", key=f"supprimer_{cible_id}"):
-                ok, message = auth.supprimer_utilisateur(cible_id)
-                if ok:
-                    _programmer_message("success", message)
-                    st.rerun()
-                else:
-                    st.error(message)
+                st.error(message)
+    with c2:
+        st.write("")
+        st.write("")
+        if st.button("🗑️ Supprimer", key=f"btn_supprimer_direction_{direction_id}"):
+            ok, message = auth.supprimer_direction(direction_id)
+            if ok:
+                _programmer_message("success", message)
+                st.rerun()
+            else:
+                st.error(message)
 
-        st.caption(
-            "Réinitialiser le mot de passe (l'utilisateur devra le changer à sa "
-            "prochaine connexion) :"
+
+def _render_permissions_section(directions_df: pd.DataFrame) -> None:
+    st.divider()
+    st.subheader("🔐 Permissions par direction")
+    st.caption(
+        "Détermine quels rapports (« 📁 Rapports ») et quels tableaux de bord "
+        "(« 📊 Tableaux de bord ») une direction peut voir. Les tableaux de bord "
+        "sont réservés aux directions qui les ont explicitement reçus — par "
+        "défaut, seule « Contrôle de gestion » y a accès."
+    )
+
+    if directions_df.empty:
+        st.info("Crée d'abord une direction ci-dessus.")
+        return
+
+    options = {row.nom: int(row.id) for row in directions_df.itertuples()}
+    choix = st.selectbox(
+        "Direction", options=list(options.keys()), index=None,
+        placeholder="Choisir une direction", key="permissions_direction_choix",
+    )
+    if not choix:
+        return
+    direction_id = options[choix]
+
+    permissions_actuelles = auth.obtenir_permissions_direction(direction_id)
+
+    with st.form(f"permissions_form_{direction_id}"):
+        st.markdown("**📁 Rapports accessibles**")
+        cols = st.columns(2)
+        cases_extraction: dict[str, bool] = {}
+        for i, extraction in enumerate(EXTRACTIONS):
+            with cols[i % 2]:
+                cases_extraction[extraction.id] = st.checkbox(
+                    f"{extraction.icon}  {extraction.label}",
+                    value=extraction.id in permissions_actuelles["extraction"],
+                    key=f"perm_extr_{direction_id}_{extraction.id}",
+                )
+
+        st.markdown("**📊 Tableaux de bord accessibles**")
+        cols = st.columns(2)
+        cases_dashboard: dict[str, bool] = {}
+        for i, dashboard in enumerate(DASHBOARDS):
+            with cols[i % 2]:
+                cases_dashboard[dashboard.id] = st.checkbox(
+                    f"{dashboard.icon}  {dashboard.label}",
+                    value=dashboard.id in permissions_actuelles["dashboard"],
+                    key=f"perm_dash_{direction_id}_{dashboard.id}",
+                )
+
+        submitted = st.form_submit_button(
+            f"Enregistrer les permissions de « {choix} »", type="primary"
         )
-        with st.form(f"reset_mdp_form_{cible_id}", clear_on_submit=True):
-            nouveau_mdp_reset = st.text_input(
-                "Nouveau mot de passe provisoire", type="password", key=f"reset_mdp_{cible_id}"
-            )
-            submitted_reset = st.form_submit_button("Réinitialiser le mot de passe")
-        if submitted_reset:
-            ok, message = auth.reinitialiser_mot_de_passe(cible_id, nouveau_mdp_reset)
-            (st.success if ok else st.error)(message)
+
+    if submitted:
+        extraction_ids = {eid for eid, coche in cases_extraction.items() if coche}
+        dashboard_ids = {did for did, coche in cases_dashboard.items() if coche}
+        ok1, msg1 = auth.definir_permissions_direction(direction_id, "extraction", extraction_ids)
+        ok2, msg2 = auth.definir_permissions_direction(direction_id, "dashboard", dashboard_ids)
+        if ok1 and ok2:
+            _programmer_message("success", f"Permissions de « {choix} » enregistrées.")
+            st.rerun()
+        else:
+            st.error(msg1 if not ok1 else msg2)
