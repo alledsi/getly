@@ -56,10 +56,11 @@ div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] {{
     margin-bottom: 18px;
 }}
 .kpi-card {{
+    box-sizing: border-box !important;
     background: {CARD_BG};
     border: 1px solid {CARD_BORDER};
     border-radius: 14px;
-    padding: 18px 20px;
+    padding: 26px 22px !important;
     height: 100%;
     box-shadow: 0 1px 2px rgba(11,11,11,0.04), 0 6px 16px rgba(11,11,11,0.035);
     transition: transform 0.15s ease, box-shadow 0.15s ease;
@@ -395,5 +396,47 @@ def bar_produits_charges(df: pd.DataFrame, label_col: str) -> go.Figure:
         plot_bgcolor=SURFACE,
         paper_bgcolor=SURFACE,
         font=dict(family=FONT_FAMILY, color=INK_SECONDARY, size=13),
+    )
+    return fig
+
+
+_MOIS_ABBR = [
+    "Jan", "Fév", "Mar", "Avr", "Mai", "Juin",
+    "Juil", "Août", "Sep", "Oct", "Nov", "Déc",
+]
+
+
+def bar_evolution_mensuelle(
+    df: pd.DataFrame,
+    date_col: str,
+    value_col: str,
+    value_fmt=fmt_montant,
+    color: str = BLUE,
+    height: int = 360,
+) -> go.Figure:
+    """Barres verticales, une par mois, triées chronologiquement — pour une
+    évolution sur une année (ex. encours mensuel)."""
+    d = df.sort_values(date_col)
+    labels = [_MOIS_ABBR[pd.Timestamp(v).month - 1] for v in d[date_col]]
+    texte = [value_fmt(v) for v in d[value_col]]
+    fig = go.Figure(
+        go.Bar(
+            x=labels,
+            y=d[value_col],
+            marker=dict(color=color, line=dict(width=0)),
+            text=texte,
+            textposition="outside",
+            cliponaxis=False,
+        )
+    )
+    fig.update_xaxes(showgrid=False, color=INK_PRIMARY)
+    fig.update_yaxes(showgrid=True, gridcolor=GRID, zeroline=True, zerolinecolor=GRID, showticklabels=False)
+    fig.update_layout(
+        height=height,
+        margin=dict(l=10, r=10, t=40, b=10),
+        plot_bgcolor=SURFACE,
+        paper_bgcolor=SURFACE,
+        font=dict(family=FONT_FAMILY, color=INK_SECONDARY, size=13),
+        showlegend=False,
     )
     return fig

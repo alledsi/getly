@@ -191,3 +191,42 @@ def get_encours_par_categorie(date_arrete: dt.date) -> pd.DataFrame:
 @st.cache_data(ttl=300, show_spinner=False)
 def encours_par_categorie_cached(date_arrete: dt.date) -> pd.DataFrame:
     return get_encours_par_categorie(date_arrete)
+
+
+# ---------------------------------------------------------------------------
+# Évolution mensuelle de l'encours (tableau de bord "Encours") : toutes les
+# dates d'arrêté d'une année donnée pour une catégorie, pas une seule photo.
+# ---------------------------------------------------------------------------
+
+
+def get_annees_encours() -> list[int]:
+    """Années disponibles dans RPT_ENCOURS, la plus récente en premier."""
+    df = fetch_df(
+        "SELECT DISTINCT EXTRACT(YEAR FROM DATE_ARRETE) AS ANNEE "
+        "FROM RPT_ENCOURS ORDER BY ANNEE DESC"
+    )
+    if df.empty:
+        return []
+    return [int(v) for v in df["ANNEE"].tolist()]
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def annees_encours_cached() -> list[int]:
+    return get_annees_encours()
+
+
+def get_encours_mensuel(categorie: str, annee: int) -> pd.DataFrame:
+    """Encours de chaque date d'arrêté d'une année, pour une catégorie
+    donnée, trié chronologiquement. Colonnes : DATE_ARRETE, MONTANT."""
+    sql = """
+        SELECT DATE_ARRETE, MONTANT
+        FROM RPT_ENCOURS
+        WHERE CATEGORIE = :categorie AND EXTRACT(YEAR FROM DATE_ARRETE) = :annee
+        ORDER BY DATE_ARRETE
+    """
+    return fetch_df(sql, {"categorie": categorie, "annee": annee})
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def encours_mensuel_cached(categorie: str, annee: int) -> pd.DataFrame:
+    return get_encours_mensuel(categorie, annee)

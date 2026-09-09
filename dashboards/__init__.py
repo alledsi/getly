@@ -13,6 +13,7 @@ from typing import Optional
 
 from dashboards.base import Dashboard
 from dashboards.cout_du_risque import render as render_cout_du_risque
+from dashboards.encours import render as render_encours
 from dashboards.rendement_portefeuille import render as render_rendement_portefeuille
 from dashboards.resultat import render as render_resultat
 from dashboards.situation_adhesions import render as render_situation_adhesions
@@ -61,6 +62,13 @@ DASHBOARDS: list[Dashboard] = [
         icon="⚖️",
         render=render_resultat,
         description="Total des revenus - total des charges.",
+    ),
+    Dashboard(
+        id="encours",
+        label="Encours",
+        icon="💰",
+        render=render_encours,
+        description="Évolution mensuelle de l'encours, par année et par catégorie.",
     ),
 ]
 

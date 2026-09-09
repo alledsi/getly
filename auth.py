@@ -72,6 +72,7 @@ _DASHBOARD_IDS_SEED_CONTROLE_GESTION = [
     "situation_revenus",
     "situation_charges",
     "resultat",
+    "encours",
 ]
 DIRECTION_CONTROLE_GESTION = "Contrôle de gestion"
 
