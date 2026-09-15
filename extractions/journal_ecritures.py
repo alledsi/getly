@@ -9,9 +9,8 @@ obligatoires. Filtres avancés facultatifs, en deux groupes :
     mutuelle, choisir une agence restreint en plus les bureaux à cette
     agence.
 
-=> journal des écritures comptables du core banking ACEP, avec solde
-cumulé par compte. Toutes les lignes correspondantes sont retournées,
-sans plafond.
+=> journal des écritures comptables du core banking ACEP. Toutes les
+lignes correspondantes sont retournées, sans plafond.
 """
 
 from __future__ import annotations
@@ -40,6 +39,7 @@ class JournalFilters:
     matricule_client: Optional[str] = None
     no_compte: Optional[str] = None
     sens_ecriture: Optional[str] = None
+    code_caisse: Optional[str] = None
     code_mutuelle: Optional[str] = None
     code_agence: Optional[str] = None
     code_bureau: Optional[str] = None
@@ -64,6 +64,7 @@ _BASE_SQL = """
         e.D_VAL_ECR          AS DATE_VALEUR,
         e.NO_PIECE           AS NO_PIECE,
         e.JOURN_ECR          AS CODE_JOURNAL,
+        e.CODE_CAISSE        AS CODE_CAISSE,
         e.CODE_OPER          AS CODE_OPERATION,
         o.LIB_OPER           AS LIBELLE_OPERATION,
         e.NO_COMPTE          AS NO_COMPTE,
@@ -99,6 +100,7 @@ _COLONNES_FINALES = [
     "DATE_VALEUR",
     "NO_PIECE",
     "CODE_JOURNAL",
+    "CODE_CAISSE",
     "CODE_OPERATION",
     "LIBELLE_OPERATION",
     "NO_COMPTE",
@@ -106,7 +108,6 @@ _COLONNES_FINALES = [
     "LIBELLE_ECRITURE",
     "DEBIT",
     "CREDIT",
-    "SOLDE",
     "MATRICULE_CLIENT",
     "RAISON_SOCIALE_CLIENT",
     "PRENOM_CLIENT",
@@ -126,15 +127,8 @@ def get_operations() -> pd.DataFrame:
 
 
 def get_journal(filters: JournalFilters) -> pd.DataFrame:
-    """
-    Construit et exécute la requête du journal des écritures selon les
-    filtres du formulaire, puis calcule un solde cumulé (par compte, dans
-    l'ordre chronologique) sur les lignes retournées.
-
-    Le "solde" ainsi calculé est un solde de mouvement sur la période/le
-    filtre sélectionné, pas le solde comptable total du compte (celui-ci
-    dépendrait des écritures antérieures non incluses dans la recherche).
-    """
+    """Construit et exécute la requête du journal des écritures selon les
+    filtres du formulaire."""
     error = filters.validate()
     if error:
         raise ValueError(error)
@@ -165,6 +159,10 @@ def get_journal(filters: JournalFilters) -> pd.DataFrame:
         sql += " AND e.SENS_ECR = :sens_ecriture"
         params["sens_ecriture"] = filters.sens_ecriture.strip()
 
+    if filters.code_caisse:
+        sql += " AND e.CODE_CAISSE = :code_caisse"
+        params["code_caisse"] = filters.code_caisse.strip()
+
     if filters.code_mutuelle:
         sql += " AND m.CODE_MUTUELLE = :code_mutuelle"
         params["code_mutuelle"] = filters.code_mutuelle.strip()
@@ -184,9 +182,9 @@ def get_journal(filters: JournalFilters) -> pd.DataFrame:
 
 
 def _enrichir_journal(df: pd.DataFrame) -> pd.DataFrame:
-    """Ajoute les colonnes Débit / Crédit / Solde cumulé et met en forme."""
+    """Ajoute les colonnes Débit / Crédit et met en forme."""
     if df.empty:
-        for col in ("DEBIT", "CREDIT", "SOLDE"):
+        for col in ("DEBIT", "CREDIT"):
             df[col] = pd.Series(dtype="float64")
         return df[[c for c in _COLONNES_FINALES if c in df.columns]]
 
@@ -200,9 +198,6 @@ def _enrichir_journal(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     df = df.sort_values(["NO_COMPTE", "DATE_ECRITURE", "NO_ECR"]).reset_index(drop=True)
-    df["SOLDE"] = df.groupby("NO_COMPTE")["DEBIT"].cumsum() - df.groupby("NO_COMPTE")[
-        "CREDIT"
-    ].cumsum()
 
     return df[_COLONNES_FINALES]
 
@@ -222,6 +217,7 @@ LIBELLES_COLONNES = {
     "DATE_VALEUR": "Date valeur",
     "NO_PIECE": "N° pièce",
     "CODE_JOURNAL": "Code journal",
+    "CODE_CAISSE": "Code caisse",
     "CODE_OPERATION": "Code opération",
     "LIBELLE_OPERATION": "Libellé opération",
     "NO_COMPTE": "N° compte",
@@ -229,7 +225,6 @@ LIBELLES_COLONNES = {
     "LIBELLE_ECRITURE": "Libellé écriture",
     "DEBIT": "Débit",
     "CREDIT": "Crédit",
-    "SOLDE": "Solde",
     "MATRICULE_CLIENT": "Matricule client",
     "RAISON_SOCIALE_CLIENT": "Raison sociale",
     "PRENOM_CLIENT": "Prénom client",
@@ -249,9 +244,9 @@ class JournalEcrituresExtraction(Extraction):
     icon = "📒"
 
     column_labels = LIBELLES_COLONNES
-    montant_cols = {"DEBIT", "CREDIT", "SOLDE"}
+    montant_cols = {"DEBIT", "CREDIT"}
     date_cols = {"DATE_ECRITURE", "DATE_VALEUR"}
-    total_cols = {"DEBIT", "CREDIT"}  # on ne totalise pas le solde (cumul), juste débit/crédit
+    total_cols = {"DEBIT", "CREDIT"}
 
     def render_form(self) -> Optional[JournalFilters]:
         # NB : pas de st.form ici — les menus Mutuelle/Agence/Bureau sont en
@@ -316,7 +311,7 @@ class JournalEcrituresExtraction(Extraction):
 
         with st.expander("Filtres avancés (facultatifs)"):
             st.caption("Identification")
-            c1, c2, c3 = st.columns(3)
+            c1, c2, c3, c4 = st.columns(4)
             with c1:
                 matricule_client = st.text_input("Matricule client")
             with c2:
@@ -330,6 +325,8 @@ class JournalEcrituresExtraction(Extraction):
                     key="sens_ecriture",
                 )
                 sens_ecriture = choix_sens.split(" — ")[0] if choix_sens else ""
+            with c4:
+                code_caisse = st.text_input("Code caisse")
 
             st.caption("Localisation (Mutuelle → Agence → Bureau)")
             code_mutuelle, code_agence, code_bureau = render_localisation_cascade(
@@ -348,6 +345,7 @@ class JournalEcrituresExtraction(Extraction):
             matricule_client=matricule_client or None,
             no_compte=no_compte or None,
             sens_ecriture=sens_ecriture or None,
+            code_caisse=code_caisse or None,
             code_mutuelle=code_mutuelle or None,
             code_agence=code_agence or None,
             code_bureau=code_bureau or None,
