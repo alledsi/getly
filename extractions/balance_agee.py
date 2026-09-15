@@ -113,6 +113,7 @@ _BASE_SQL = """
         enc_brut.par_180                 AS RETARD_180,
         enc_brut.par_360                 AS RETARD_360,
         enc_brut.par_720                 AS RETARD_720,
+        enc_brut.solde_prov_th           AS PROVISIONS,
         enc_brut.cycle_pret              AS CYCLE_PRET,
         sous_secteur.code_sect           AS CODE_SECT,
         secteur.lib_sect                 AS LIB_SECT,
@@ -174,6 +175,7 @@ _COLONNES_FINALES = [
     "ENCOURS_CAP", "IMPAYE_CAP", "MT_IMPAYE", "DUREE_IMP", "CRD_JOUR",
     "RETARD_29", "RETARD_30", "RETARD_60", "RETARD_90",
     "RETARD_180", "RETARD_360", "RETARD_720",
+    "PROVISIONS",
     "CYCLE_PRET",
     "CODE_SECT", "LIB_SECT", "LIB_SSECT",
     "RESSOURCE_AFF", "INT_CATEGORIE",
@@ -345,6 +347,7 @@ LIBELLES_COLONNES = {
     "RETARD_180": "Retard 180j",
     "RETARD_360": "Retard 360j",
     "RETARD_720": "Retard 720j",
+    "PROVISIONS": "Provisions",
     "CYCLE_PRET": "Cycle prêt",
     "CODE_SECT": "Code secteur",
     "LIB_SECT": "Secteur d'activité",
@@ -374,12 +377,13 @@ class BalanceAgeeExtraction(Extraction):
         "MT_INT_CAPITALISE", "MT_ECH_PRET", "ENCOURS_CAP", "IMPAYE_CAP",
         "MT_IMPAYE", "CRD_JOUR", "RETARD_29", "RETARD_30", "RETARD_60",
         "RETARD_90", "RETARD_180", "RETARD_360", "RETARD_720", "VALEUR_GARANTIE",
+        "PROVISIONS",
     }
     date_cols = {"D_MEP_PRET", "D_PREM_ECH", "D_DER_ECH"}
     total_cols = {
         "MT_CAPITAL_PRET", "ENCOURS_CAP", "IMPAYE_CAP", "MT_IMPAYE",
         "RETARD_29", "RETARD_30", "RETARD_60", "RETARD_90",
-        "RETARD_180", "RETARD_360", "RETARD_720",
+        "RETARD_180", "RETARD_360", "RETARD_720", "PROVISIONS",
     }
 
     def render_form(self) -> Optional[BalanceAgeeFilters]:
