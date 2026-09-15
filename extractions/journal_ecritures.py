@@ -3,11 +3,16 @@ Extraction : Journal des écritures.
 
 Formulaire : un ou plusieurs codes opération, date début, date fin
 obligatoires. Filtres avancés facultatifs, en deux groupes :
-  - identification : matricule client, n° compte, sens écriture
   - localisation, hiérarchique (Mutuelle -> Agence -> Bureau) : choisir
     une mutuelle restreint les agences et bureaux proposés à cette
     mutuelle, choisir une agence restreint en plus les bureaux à cette
     agence.
+  - identification : matricule client, n° compte, sens écriture, caisse
+    (menu déroulant "Code — Libellé", table CAISSE) — dépend du bureau
+    choisi ci-dessus : sans bureau choisi, toutes les caisses sont
+    proposées ; avec un bureau choisi, seules les caisses de ce bureau le
+    sont. La localisation est donc affichée avant l'identification dans
+    le formulaire, pour que la caisse se filtre correctement.
 
 => journal des écritures comptables du core banking ACEP. Toutes les
 lignes correspondantes sont retournées, sans plafond.
@@ -24,7 +29,12 @@ import streamlit as st
 
 from db import fetch_df
 from extractions.base import Extraction
-from extractions.reference_data import referentiel_localisation_cached, render_localisation_cascade
+from extractions.reference_data import (
+    referentiel_caisses_cached,
+    referentiel_localisation_cached,
+    render_localisation_cascade,
+    select_code_libelle,
+)
 
 # ---------------------------------------------------------------------------
 # Filtres du formulaire
@@ -280,6 +290,15 @@ class JournalEcrituresExtraction(Extraction):
                 "les filtres avancés."
             )
 
+        try:
+            ref_caisses_df = referentiel_caisses_cached()
+        except Exception:  # noqa: BLE001
+            ref_caisses_df = pd.DataFrame(columns=["CODE_CAISSE", "LIBELLE_CAISSE", "CODE_BUREAU"])
+            st.warning(
+                "Impossible de charger la liste des caisses depuis la base. "
+                "Le filtre caisse ne sera pas disponible pour cette recherche."
+            )
+
         st.subheader("Critères de recherche")
         col1, col2, col3 = st.columns(3)
 
@@ -310,6 +329,11 @@ class JournalEcrituresExtraction(Extraction):
             date_fin = st.date_input("Date fin *", value=dt.date.today())
 
         with st.expander("Filtres avancés (facultatifs)"):
+            st.caption("Localisation (Mutuelle → Agence → Bureau)")
+            code_mutuelle, code_agence, code_bureau = render_localisation_cascade(
+                ref_localisation_df, key_prefix="journal_"
+            )
+
             st.caption("Identification")
             c1, c2, c3, c4 = st.columns(4)
             with c1:
@@ -326,12 +350,33 @@ class JournalEcrituresExtraction(Extraction):
                 )
                 sens_ecriture = choix_sens.split(" — ")[0] if choix_sens else ""
             with c4:
-                code_caisse = st.text_input("Code caisse")
+                # Caisse dépendante du bureau choisi ci-dessus : sans bureau
+                # sélectionné, toutes les caisses sont proposées ; avec un
+                # bureau, seules celles de ce bureau. Réinitialise le choix
+                # de caisse quand le bureau change (même principe que la
+                # cascade Mutuelle -> Agence -> Bureau).
+                k_caisse = "journal_code_caisse"
+                k_last_bureau_caisse = "journal__last_code_bureau_caisse"
+                if code_bureau != st.session_state.get(k_last_bureau_caisse):
+                    st.session_state.pop(k_caisse, None)
+                    st.session_state[k_last_bureau_caisse] = code_bureau
 
-            st.caption("Localisation (Mutuelle → Agence → Bureau)")
-            code_mutuelle, code_agence, code_bureau = render_localisation_cascade(
-                ref_localisation_df, key_prefix="journal_"
-            )
+                perimetre_caisses = (
+                    ref_caisses_df
+                    if not code_bureau
+                    else ref_caisses_df[ref_caisses_df["CODE_BUREAU"] == code_bureau]
+                )
+                caisses_df = (
+                    perimetre_caisses[["CODE_CAISSE", "LIBELLE_CAISSE"]]
+                    .dropna(subset=["CODE_CAISSE"])
+                    .drop_duplicates()
+                    .sort_values("LIBELLE_CAISSE")
+                )
+                code_caisse = select_code_libelle(
+                    "Caisse", caisses_df, "CODE_CAISSE", "LIBELLE_CAISSE",
+                    "Toutes", k_caisse,
+                    allow_text_fallback=ref_caisses_df.empty,
+                )
 
         submitted = st.button("🔍 Générer le journal", width="stretch", type="primary")
 

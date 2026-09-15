@@ -109,6 +109,26 @@ def referentiel_localisation_cached() -> pd.DataFrame:
     return get_referentiel_localisation()
 
 
+def get_referentiel_caisses() -> pd.DataFrame:
+    """
+    Caisses (table CAISSE) avec leur bureau, pour construire un menu
+    déroulant "Caisse" dépendant du bureau choisi (filtrage local une fois
+    le référentiel complet chargé, sur le même principe que la cascade
+    Mutuelle -> Agence -> Bureau).
+    """
+    sql = """
+        SELECT CODE_CAISSE, LIBELLE_CAISSE, CODE_BUREAU
+        FROM CAISSE
+        ORDER BY LIBELLE_CAISSE
+    """
+    return fetch_df(sql)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def referentiel_caisses_cached() -> pd.DataFrame:
+    return get_referentiel_caisses()
+
+
 def select_code_libelle(
     label: str,
     df: pd.DataFrame,
