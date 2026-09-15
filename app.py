@@ -239,6 +239,8 @@ if res_key in st.session_state:
                 "Total crédit", f"{df['CREDIT'].sum():,.2f}".replace(",", " ")
             )
 
+        extraction.render_resume_extra(df, filtres_actifs)
+
         column_config = {}
         for c in extraction.date_cols:
             if c in df.columns:

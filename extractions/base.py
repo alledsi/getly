@@ -60,3 +60,13 @@ class Extraction(ABC):
     def excel_filename(self, filters: Any) -> str:
         """Nom du fichier Excel proposé au téléchargement."""
         return f"{self.id}.xlsx"
+
+    def render_resume_extra(self, df: pd.DataFrame, filters: Any) -> None:
+        """
+        Point d'extension facultatif : résumé propre à cette extraction,
+        affiché juste après les métriques génériques (nombre de lignes,
+        total débit/crédit) et avant le tableau de résultat. Ne rien faire
+        par défaut — une extraction le surcharge si elle a besoin d'un
+        indicateur spécifique (ex. répartition par statut).
+        """
+        return None

@@ -17,6 +17,7 @@ from extractions.journal_ecritures import JournalEcrituresExtraction
 from extractions.recapitulatif_ecritures import RecapitulatifEcrituresExtraction
 from extractions.etat_depots import EtatDepotsExtraction
 from extractions.comptes_debiteurs import ComptesDebiteursExtraction
+from extractions.comptes_inactifs_dormants import ComptesInactifsDormantsExtraction
 from extractions.classement_encours import (
     PlusGrosConsommateursExtraction,
     PlusPetitsConsommateursExtraction,
@@ -33,6 +34,7 @@ EXTRACTIONS: list[Extraction] = [
     RecapitulatifEcrituresExtraction(),
     EtatDepotsExtraction(),
     ComptesDebiteursExtraction(),
+    ComptesInactifsDormantsExtraction(),
     PlusGrosConsommateursExtraction(),
     PlusPetitsConsommateursExtraction(),
     PlusGrosContentieuxExtraction(),
