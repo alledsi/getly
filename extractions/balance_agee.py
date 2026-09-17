@@ -101,6 +101,7 @@ _BASE_SQL = """
         pret.nb_ech_pret                 AS NB_ECH_PRET,
         pret.d_prem_ech                  AS D_PREM_ECH,
         pret.d_der_ech                   AS D_DER_ECH,
+        pret.mt_epaobli                  AS EPARGNE_OBLIGATOIRE,
         enc_brut.encours_cap             AS ENCOURS_CAP,
         enc_brut.impaye_cap              AS IMPAYE_CAP,
         enc_brut.mt_impaye               AS MT_IMPAYE,
@@ -172,6 +173,7 @@ _COLONNES_FINALES = [
     "MT_CAPITAL_PRET", "FRAIS_ACTES", "MT_FRAIDOS", "ASSUR_AGRICOLE",
     "MT_PRET_INT", "MT_INT_CAPITALISE", "TX_INT_PRET",
     "MT_ECH_PRET", "PERIOD_ECH", "NB_ECH_PRET", "D_PREM_ECH", "D_DER_ECH",
+    "EPARGNE_OBLIGATOIRE",
     "ENCOURS_CAP", "IMPAYE_CAP", "MT_IMPAYE", "DUREE_IMP", "CRD_JOUR",
     "RETARD_29", "RETARD_30", "RETARD_60", "RETARD_90",
     "RETARD_180", "RETARD_360", "RETARD_720",
@@ -335,6 +337,7 @@ LIBELLES_COLONNES = {
     "NB_ECH_PRET": "Nombre d'échéances",
     "D_PREM_ECH": "Date première échéance",
     "D_DER_ECH": "Date dernière échéance",
+    "EPARGNE_OBLIGATOIRE": "Épargne obligatoire",
     "ENCOURS_CAP": "Encours capital",
     "IMPAYE_CAP": "Impayé capital",
     "MT_IMPAYE": "Montant impayé",
@@ -374,14 +377,15 @@ class BalanceAgeeExtraction(Extraction):
     column_labels = LIBELLES_COLONNES
     montant_cols = {
         "MT_CAPITAL_PRET", "FRAIS_ACTES", "MT_FRAIDOS", "MT_PRET_INT",
-        "MT_INT_CAPITALISE", "MT_ECH_PRET", "ENCOURS_CAP", "IMPAYE_CAP",
+        "MT_INT_CAPITALISE", "MT_ECH_PRET", "EPARGNE_OBLIGATOIRE",
+        "ENCOURS_CAP", "IMPAYE_CAP",
         "MT_IMPAYE", "CRD_JOUR", "RETARD_29", "RETARD_30", "RETARD_60",
         "RETARD_90", "RETARD_180", "RETARD_360", "RETARD_720", "VALEUR_GARANTIE",
         "PROVISIONS",
     }
     date_cols = {"D_MEP_PRET", "D_PREM_ECH", "D_DER_ECH"}
     total_cols = {
-        "MT_CAPITAL_PRET", "ENCOURS_CAP", "IMPAYE_CAP", "MT_IMPAYE",
+        "MT_CAPITAL_PRET", "EPARGNE_OBLIGATOIRE", "ENCOURS_CAP", "IMPAYE_CAP", "MT_IMPAYE",
         "RETARD_29", "RETARD_30", "RETARD_60", "RETARD_90",
         "RETARD_180", "RETARD_360", "RETARD_720", "PROVISIONS",
     }
