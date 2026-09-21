@@ -32,6 +32,16 @@ rapports (comportement historique, pour ne pas casser les déploiements
 existants) mais n'a accès à aucun tableau de bord — cette fonctionnalité
 est nouvelle et réservée par direction dès le départ (voir
 `get_visible_item_ids`).
+
+La direction "Direction Générale" est un cas particulier amorcé
+automatiquement (comme "Contrôle de gestion") : un utilisateur qui y est
+rattaché voit TOUT (tous les rapports, tous les tableaux de bord — y
+compris ceux ajoutés plus tard), exactement comme un administrateur,
+mais sans les droits de gestion des comptes/permissions. Contrairement
+aux autres directions, son accès n'est pas stocké dans
+`direction_permissions` (rien à cocher, rien à tenir à jour) : c'est
+`get_visible_item_ids` qui la reconnaît par son nom et renvoie « accès à
+tout ».
 """
 
 from __future__ import annotations
@@ -75,6 +85,11 @@ _DASHBOARD_IDS_SEED_CONTROLE_GESTION = [
     "encours",
 ]
 DIRECTION_CONTROLE_GESTION = "Contrôle de gestion"
+
+# Direction spéciale : accès total (rapports + tableaux de bord, y compris
+# ceux ajoutés ultérieurement) sans les droits d'administration. Voir
+# get_visible_item_ids.
+DIRECTION_GENERALE = "Direction Générale"
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +207,19 @@ def init_db() -> None:
             conn.executemany(
                 "INSERT OR IGNORE INTO direction_permissions (direction_id, item_type, item_id) VALUES (?, 'dashboard', ?)",
                 [(cg_id, dashboard_id) for dashboard_id in _DASHBOARD_IDS_SEED_CONTROLE_GESTION],
+            )
+
+        # Amorce la direction "Direction Générale" (accès total à tout —
+        # rapports et tableaux de bord, présents et futurs — voir
+        # get_visible_item_ids). Ne s'exécute qu'une fois : si la direction
+        # existe déjà, on ne touche à rien.
+        dg = conn.execute(
+            "SELECT id FROM directions WHERE nom = ?", (DIRECTION_GENERALE,)
+        ).fetchone()
+        if dg is None:
+            conn.execute(
+                "INSERT INTO directions (nom, cree_le) VALUES (?, ?)",
+                (DIRECTION_GENERALE, dt.datetime.now().isoformat(timespec="seconds")),
             )
 
 
@@ -542,8 +570,12 @@ def get_visible_item_ids(user: dict, item_type: str) -> Optional[set[str]]:
     direction n'a en revanche accès à aucun tableau de bord : cette
     fonctionnalité est nouvelle et réservée par direction dès le départ.
     Pour un utilisateur avec direction, retourne l'ensemble (éventuellement
-    vide) explicitement accordé à sa direction."""
+    vide) explicitement accordé à sa direction. Exception : la direction
+    "Direction Générale" (voir DIRECTION_GENERALE) renvoie toujours
+    « accès à tout », comme un administrateur."""
     if user.get("role") == "admin":
+        return None
+    if user.get("direction_nom") == DIRECTION_GENERALE:
         return None
     direction_id = user.get("direction_id")
     if direction_id is None:

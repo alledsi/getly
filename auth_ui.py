@@ -384,6 +384,15 @@ def _render_permissions_section(directions_df: pd.DataFrame) -> None:
     )
     if not choix:
         return
+
+    if choix == auth.DIRECTION_GENERALE:
+        st.info(
+            "« Direction Générale » a automatiquement accès à **tous** les "
+            "rapports et tous les tableaux de bord — présents et futurs — "
+            "comme un administrateur. Rien à cocher ici."
+        )
+        return
+
     direction_id = options[choix]
 
     permissions_actuelles = auth.obtenir_permissions_direction(direction_id)
