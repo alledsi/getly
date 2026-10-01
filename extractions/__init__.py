@@ -16,6 +16,8 @@ from extractions.balance_agee import BalanceAgeeExtraction
 from extractions.journal_ecritures import JournalEcrituresExtraction
 from extractions.recapitulatif_ecritures import RecapitulatifEcrituresExtraction
 from extractions.etat_depots import EtatDepotsExtraction
+from extractions.depots_comptes_courants import DepotsComptesCourantsExtraction
+from extractions.depots_epargne import DepotsEpargneExtraction
 from extractions.comptes_debiteurs import ComptesDebiteursExtraction
 from extractions.nouveaux_comptes_debiteurs import NouveauxComptesDebiteursExtraction
 from extractions.comptes_inactifs_dormants import ComptesInactifsDormantsExtraction
@@ -38,6 +40,8 @@ EXTRACTIONS: list[Extraction] = [
     EcrituresDoublonsSuspectesExtraction(),
     HistMailsAlertesExtraction(),
     EtatDepotsExtraction(),
+    DepotsComptesCourantsExtraction(),
+    DepotsEpargneExtraction(),
     ComptesDebiteursExtraction(),
     NouveauxComptesDebiteursExtraction(),
     ComptesInactifsDormantsExtraction(),

@@ -85,6 +85,26 @@ def dates_arrete_etat_depots_cached() -> list[dt.date]:
     return get_dates_arrete_etat_depots()
 
 
+def get_dates_arrete_depots_comptes_courants() -> list[dt.date]:
+    """Dates d'arrêté distinctes disponibles dans RPT_DEPOTS_COMPTES_COURANTS, la plus récente en premier."""
+    return _get_dates_arrete("rpt_depots_comptes_courants")
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def dates_arrete_depots_comptes_courants_cached() -> list[dt.date]:
+    return get_dates_arrete_depots_comptes_courants()
+
+
+def get_dates_arrete_depots_epargne() -> list[dt.date]:
+    """Dates d'arrêté distinctes disponibles dans RPT_DEPOTS_EPARGNE, la plus récente en premier."""
+    return _get_dates_arrete("rpt_depots_epargne")
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def dates_arrete_depots_epargne_cached() -> list[dt.date]:
+    return get_dates_arrete_depots_epargne()
+
+
 def get_referentiel_localisation() -> pd.DataFrame:
     """
     Bureaux avec leur agence et leur mutuelle (hiérarchie
