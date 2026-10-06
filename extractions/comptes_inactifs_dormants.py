@@ -6,18 +6,16 @@ table de reporting RPT_COMPTES_INACTIFS_DORMANTS, avec les informations
 du titulaire (nom, adresse, nationalité, pièce d'identité) et la date du
 dernier mouvement.
 
-Filtre facultatif : statut compte (Inactif / Dormant / Tous). Filtres
-facultatifs supplémentaires : localisation hiérarchique (Mutuelle ->
-Agence -> Bureau), obtenue en reliant RPT_COMPTES_INACTIFS_DORMANTS à
-COMPTE via NUMERO_COMPTE = NO_COMPTE (la table de reporting elle-même ne
-porte pas de code bureau).
+Champ obligatoire : date d'arrêté (liste déroulante des dates
+disponibles, la plus récente par défaut — placée à côté du filtre
+Statut compte). Filtre facultatif : statut compte (Inactif / Dormant /
+Tous). Filtres facultatifs supplémentaires : localisation hiérarchique
+(Mutuelle -> Agence -> Bureau), obtenue en reliant
+RPT_COMPTES_INACTIFS_DORMANTS à COMPTE via NUMERO_COMPTE = NO_COMPTE (la
+table de reporting elle-même ne porte pas de code bureau).
 
-La table ne porte qu'une seule date d'arrêté à la fois (même valeur sur
-toutes les lignes) : pas de filtre pour la choisir, mais la colonne est
-affichée dans le résultat pour que l'utilisateur sache à quelle date les
-données correspondent. Quand aucun filtre de statut n'est appliqué, un
-résumé affiche le nombre de comptes inactifs et le nombre de comptes
-dormants séparément.
+Quand aucun filtre de statut n'est appliqué, un résumé affiche le nombre
+de comptes inactifs et le nombre de comptes dormants séparément.
 """
 
 from __future__ import annotations
@@ -31,7 +29,11 @@ import streamlit as st
 
 from db import fetch_df
 from extractions.base import Extraction
-from extractions.reference_data import referentiel_localisation_cached, render_localisation_cascade
+from extractions.reference_data import (
+    dates_arrete_comptes_inactifs_dormants_cached,
+    referentiel_localisation_cached,
+    render_localisation_cascade,
+)
 
 # ---------------------------------------------------------------------------
 # Filtres du formulaire
@@ -44,12 +46,15 @@ _STATUT_CODE_PAR_OPTION = {"Inactif (N)": "N", "Dormant (D)": "D"}
 
 @dataclass
 class ComptesInactifsDormantsFilters:
+    date_arrete: Optional[dt.date]
     status_compte: Optional[str] = None
     code_mutuelle: Optional[str] = None
     code_agence: Optional[str] = None
     code_bureau: Optional[str] = None
 
     def validate(self) -> Optional[str]:
+        if not self.date_arrete:
+            return "La date d'arrêté est obligatoire."
         return None
 
 
@@ -82,7 +87,7 @@ _BASE_SQL = """
     LEFT JOIN BUREAU   b   ON b.CODE_BUREAU = cpt.CODE_BUREAU
     LEFT JOIN REGION   r   ON r.CODE_REGION = b.CODE_REGION
     LEFT JOIN MUTUELLE m   ON m.CODE_MUTUELLE = r.CODE_MUTUELLE
-    WHERE 1 = 1
+    WHERE d.DATE_ARRETE = :date_arrete
 """
 
 _ORDER_SQL = " ORDER BY d.NUMERO_COMPTE"
@@ -115,7 +120,9 @@ def get_comptes_inactifs_dormants(filters: ComptesInactifsDormantsFilters) -> pd
         raise ValueError(error)
 
     sql = _BASE_SQL
-    params: dict = {}
+    params: dict = {
+        "date_arrete": dt.datetime.combine(filters.date_arrete, dt.time.min),
+    }
 
     if filters.status_compte:
         sql += " AND d.STATUS_COMPTE = :status_compte"
@@ -191,6 +198,16 @@ class ComptesInactifsDormantsExtraction(Extraction):
         # choix, ce que st.form empêche (il ne rerun qu'à la soumission).
 
         try:
+            dates_dispo = dates_arrete_comptes_inactifs_dormants_cached()
+        except Exception:  # noqa: BLE001
+            dates_dispo = []
+            st.warning(
+                "Impossible de charger les dates d'arrêté disponibles "
+                "(vérifie que le fichier .env est bien configuré et que le "
+                "serveur a accès à la base)."
+            )
+
+        try:
             ref_localisation_df = referentiel_localisation_cached()
         except Exception:  # noqa: BLE001
             ref_localisation_df = pd.DataFrame(
@@ -207,13 +224,29 @@ class ComptesInactifsDormantsExtraction(Extraction):
 
         st.subheader("Critères de recherche")
 
-        choix_statut = st.selectbox(
-            "Statut compte",
-            options=_STATUT_OPTIONS,
-            index=None,
-            placeholder="Tous",
-        )
-        status_compte = _STATUT_CODE_PAR_OPTION.get(choix_statut, "")
+        c1, c2 = st.columns(2)
+        with c1:
+            if dates_dispo:
+                date_arrete = st.selectbox(
+                    "Date d'arrêté *",
+                    options=dates_dispo,
+                    index=0,  # la plus récente (liste triée du plus récent au plus ancien)
+                    format_func=lambda d: d.strftime("%d/%m/%Y"),
+                )
+            else:
+                st.error(
+                    "Aucune date d'arrêté trouvée. Cette extraction ne peut "
+                    "pas être calculée pour le moment."
+                )
+                date_arrete = None
+        with c2:
+            choix_statut = st.selectbox(
+                "Statut compte",
+                options=_STATUT_OPTIONS,
+                index=None,
+                placeholder="Tous",
+            )
+            status_compte = _STATUT_CODE_PAR_OPTION.get(choix_statut, "")
 
         with st.expander("Filtres avancés (facultatifs)"):
             st.caption("Localisation (Mutuelle → Agence → Bureau)")
@@ -229,6 +262,7 @@ class ComptesInactifsDormantsExtraction(Extraction):
             return None
 
         filters = ComptesInactifsDormantsFilters(
+            date_arrete=date_arrete,
             status_compte=status_compte or None,
             code_mutuelle=code_mutuelle or None,
             code_agence=code_agence or None,
@@ -257,4 +291,4 @@ class ComptesInactifsDormantsExtraction(Extraction):
 
     def excel_filename(self, filters: ComptesInactifsDormantsFilters) -> str:
         suffixe = f"_{filters.status_compte}" if filters.status_compte else ""
-        return f"comptes_inactifs_dormants{suffixe}_{dt.date.today():%Y%m%d}.xlsx"
+        return f"comptes_inactifs_dormants{suffixe}_{filters.date_arrete:%Y%m%d}.xlsx"
