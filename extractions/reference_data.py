@@ -185,6 +185,16 @@ def render_annee_mois(
     return annee, mois
 
 
+def get_dates_arrete_eval_cc() -> list[dt.date]:
+    """Dates d'arrêté distinctes disponibles dans la vue SV_EVAL_CC, la plus récente en premier."""
+    return _get_dates_arrete("sv_eval_cc")
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def dates_arrete_eval_cc_cached() -> list[dt.date]:
+    return get_dates_arrete_eval_cc()
+
+
 def get_referentiel_localisation() -> pd.DataFrame:
     """
     Bureaux avec leur agence et leur mutuelle (hiérarchie

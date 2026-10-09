@@ -24,6 +24,7 @@ from extractions.comptes_inactifs_dormants import ComptesInactifsDormantsExtract
 from extractions.ecritures_doublons_suspectes import EcrituresDoublonsSuspectesExtraction
 from extractions.hist_mails_alertes import HistMailsAlertesExtraction
 from extractions.suivi_epargne import SuiviEpargneExtraction
+from extractions.eval_cc_attrition import EvalCcAttritionExtraction
 from extractions.classement_encours import (
     PlusGrosConsommateursExtraction,
     PlusPetitsConsommateursExtraction,
@@ -44,6 +45,7 @@ EXTRACTIONS: list[Extraction] = [
     DepotsComptesCourantsExtraction(),
     DepotsEpargneExtraction(),
     SuiviEpargneExtraction(),
+    EvalCcAttritionExtraction(),
     ComptesDebiteursExtraction(),
     NouveauxComptesDebiteursExtraction(),
     ComptesInactifsDormantsExtraction(),
