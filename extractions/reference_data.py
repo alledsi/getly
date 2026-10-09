@@ -115,6 +115,76 @@ def dates_arrete_comptes_inactifs_dormants_cached() -> list[dt.date]:
     return get_dates_arrete_comptes_inactifs_dormants()
 
 
+def get_annees_mois_sv_epargne() -> list[tuple[int, int]]:
+    """Couples (année, numéro de mois) distincts disponibles dans la vue
+    SV_EPARGNE, du plus récent au plus ancien."""
+    df = fetch_df(
+        "SELECT DISTINCT ANNEE, NUM_MOIS FROM sv_epargne "
+        "ORDER BY ANNEE DESC, NUM_MOIS DESC"
+    )
+    if df.empty:
+        return []
+    return [(int(row.ANNEE), int(row.NUM_MOIS)) for row in df.itertuples()]
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def annees_mois_sv_epargne_cached() -> list[tuple[int, int]]:
+    return get_annees_mois_sv_epargne()
+
+
+MOIS_LABELS = {
+    1: "Janvier", 2: "Février", 3: "Mars", 4: "Avril",
+    5: "Mai", 6: "Juin", 7: "Juillet", 8: "Août",
+    9: "Septembre", 10: "Octobre", 11: "Novembre", 12: "Décembre",
+}
+
+
+def render_annee_mois(
+    annees_mois: list[tuple[int, int]],
+    key_prefix: str = "",
+) -> tuple[Optional[int], Optional[int]]:
+    """
+    Affiche deux menus déroulants "Année" / "Mois" côte à côte, à partir
+    d'une liste de couples (année, mois) disponibles (triée du plus
+    récent au plus ancien). Par défaut, sélectionne le couple le plus
+    récent. Le choix du mois se réinitialise sur le mois le plus récent
+    disponible pour l'année choisie quand on change d'année.
+
+    Retourne (annee, mois) sélectionnés, ou (None, None) si aucune donnée
+    disponible.
+    """
+    if not annees_mois:
+        return None, None
+
+    k_annee = f"{key_prefix}annee"
+    k_mois = f"{key_prefix}mois"
+    k_last_annee = f"{key_prefix}_last_annee"
+
+    annees = sorted({a for a, _ in annees_mois}, reverse=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        annee = st.selectbox("Année *", options=annees, index=0, key=k_annee)
+
+    # Réinitialise le mois sélectionné quand l'année change
+    if annee != st.session_state.get(k_last_annee):
+        st.session_state.pop(k_mois, None)
+        st.session_state[k_last_annee] = annee
+
+    mois_dispo = sorted({m for a, m in annees_mois if a == annee}, reverse=True)
+
+    with c2:
+        mois = st.selectbox(
+            "Mois *",
+            options=mois_dispo,
+            index=0,
+            format_func=lambda m: MOIS_LABELS.get(m, str(m)),
+            key=k_mois,
+        )
+
+    return annee, mois
+
+
 def get_referentiel_localisation() -> pd.DataFrame:
     """
     Bureaux avec leur agence et leur mutuelle (hiérarchie
