@@ -25,7 +25,6 @@ from auth_ui import (
 from dashboards import DASHBOARDS, get_dashboard
 from dashboards import components as c
 from dashboards import data as dashboard_data
-from export_excel import build_excel
 from extractions import EXTRACTIONS, get_extraction
 
 st.set_page_config(page_title="Getly", page_icon="📊", layout="wide")
@@ -260,14 +259,7 @@ if res_key in st.session_state:
             column_config=column_config,
         )
 
-        excel_buffer = build_excel(
-            df,
-            column_labels=extraction.column_labels,
-            montant_cols=extraction.montant_cols,
-            date_cols=extraction.date_cols,
-            total_cols=extraction.total_cols,
-            sheet_name=extraction.label,
-        )
+        excel_buffer = extraction.build_excel_export(df, filtres_actifs)
         st.download_button(
             label="⬇️ Télécharger en Excel",
             data=excel_buffer,

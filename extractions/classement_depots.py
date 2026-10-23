@@ -27,18 +27,31 @@ disponibles dans RPT_ETAT_DEPOTS, la plus récente par défaut). Seul
 filtre facultatif : localisation hiérarchique (Mutuelle -> Agence ->
 Bureau) — pas de filtre par matricule client/compte ici, puisqu'il s'agit
 d'un classement agrégé par client.
+
+**Mode "Par mutuelle"** (ajouté le 23/10/2026) : une case à cocher
+"📊 PAR MUTUELLE" remplace les filtres Mutuelle/Agence/Bureau par un
+classement top 50 recalculé séparément pour CHAQUE mutuelle (top 50 de
+chaque, combinés en un seul tableau — ex. 10 mutuelles -> 500 lignes,
+triées par mutuelle puis par rang). Techniquement : le `ROW_NUMBER()`
+est partitionné par mutuelle (`PARTITION BY code_mutuelle`) au lieu
+d'être global, et les clients sans mutuelle rattachée sont exclus (pas
+de feuille à leur nom pour l'export). À l'export Excel, chaque mutuelle
+reçoit sa propre feuille (voir `build_excel_export` ci-dessous et
+`export_excel.build_excel_multi_sheet`).
 """
 
 from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
-from typing import Optional
+from io import BytesIO
+from typing import Any, Optional
 
 import pandas as pd
 import streamlit as st
 
 from db import fetch_df
+from export_excel import build_excel_multi_sheet
 from extractions.base import Extraction
 from extractions.reference_data import (
     dates_arrete_etat_depots_cached,
@@ -57,6 +70,7 @@ class DepotsClassementFilters:
     code_mutuelle: Optional[str] = None
     code_agence: Optional[str] = None
     code_bureau: Optional[str] = None
+    par_mutuelle: bool = False
 
     def validate(self) -> Optional[str]:
         if not self.date_arrete:
@@ -69,7 +83,22 @@ class DepotsClassementFilters:
 # ---------------------------------------------------------------------------
 
 
-def _build_sql(ordre: str, seuil_operateur: str, seuil_valeur: int, filtres_localisation: str) -> str:
+def _build_sql(
+    ordre: str,
+    seuil_operateur: str,
+    seuil_valeur: int,
+    filtres_localisation: str,
+    par_mutuelle: bool = False,
+) -> str:
+    # Mode "Par mutuelle" : un classement distinct par mutuelle (rang
+    # réinitialisé à chaque mutuelle) plutôt qu'un classement global, et
+    # on exclut les clients sans mutuelle rattachée (pas de feuille Excel
+    # possible pour eux). Résultat trié par mutuelle puis par rang, pour
+    # que les groupes soient contigus (affichage + découpage en feuilles).
+    filtre_mutuelle_requise = " AND d.CODE_MUTUELLE IS NOT NULL" if par_mutuelle else ""
+    partition_clause = "PARTITION BY code_mutuelle " if par_mutuelle else ""
+    order_final = "ORDER BY nom_mutuelle, rang" if par_mutuelle else "ORDER BY rang"
+
     return f"""
         WITH compte_solde AS (
             SELECT
@@ -89,6 +118,7 @@ def _build_sql(ordre: str, seuil_operateur: str, seuil_valeur: int, filtres_loca
             WHERE d.DATE_ARRETE = :date_arrete
               AND d.MATRICULE_CLIENT IS NOT NULL
               {filtres_localisation}
+              {filtre_mutuelle_requise}
         ),
         client_agg AS (
             SELECT
@@ -108,7 +138,7 @@ def _build_sql(ordre: str, seuil_operateur: str, seuil_valeur: int, filtres_loca
         client_rank AS (
             SELECT
                 ca.*,
-                ROW_NUMBER() OVER (ORDER BY solde_cumule {ordre}) AS rang
+                ROW_NUMBER() OVER ({partition_clause}ORDER BY solde_cumule {ordre}) AS rang
             FROM client_agg ca
         )
         SELECT
@@ -121,7 +151,7 @@ def _build_sql(ordre: str, seuil_operateur: str, seuil_valeur: int, filtres_loca
             rang
         FROM client_rank
         WHERE rang <= 50
-        ORDER BY rang
+        {order_final}
     """
 
 
@@ -146,7 +176,8 @@ def get_classement_depots(
     seuil_operateur: str,
     seuil_valeur: int,
 ) -> pd.DataFrame:
-    """Exécute le classement (top 50) des clients par solde de dépôts cumulé."""
+    """Exécute le classement (top 50, ou top 50 par mutuelle en mode "Par
+    mutuelle") des clients par solde de dépôts cumulé."""
     error = filters.validate()
     if error:
         raise ValueError(error)
@@ -156,19 +187,23 @@ def get_classement_depots(
     }
 
     filtres_localisation = ""
-    if filters.code_mutuelle:
-        filtres_localisation += " AND d.CODE_MUTUELLE = :code_mutuelle"
-        params["code_mutuelle"] = filters.code_mutuelle.strip()
+    if not filters.par_mutuelle:
+        if filters.code_mutuelle:
+            filtres_localisation += " AND d.CODE_MUTUELLE = :code_mutuelle"
+            params["code_mutuelle"] = filters.code_mutuelle.strip()
 
-    if filters.code_agence:
-        filtres_localisation += " AND d.CODE_AGENCE = :code_agence"
-        params["code_agence"] = filters.code_agence.strip()
+        if filters.code_agence:
+            filtres_localisation += " AND d.CODE_AGENCE = :code_agence"
+            params["code_agence"] = filters.code_agence.strip()
 
-    if filters.code_bureau:
-        filtres_localisation += " AND d.CODE_BUREAU = :code_bureau"
-        params["code_bureau"] = filters.code_bureau.strip()
+        if filters.code_bureau:
+            filtres_localisation += " AND d.CODE_BUREAU = :code_bureau"
+            params["code_bureau"] = filters.code_bureau.strip()
 
-    sql = _build_sql(ordre, seuil_operateur, seuil_valeur, filtres_localisation)
+    sql = _build_sql(
+        ordre, seuil_operateur, seuil_valeur, filtres_localisation,
+        par_mutuelle=filters.par_mutuelle,
+    )
 
     df = fetch_df(sql, params)
     if df.empty:
@@ -192,21 +227,6 @@ def _render_form_commun(titre_bouton: str, key_prefix: str) -> Optional[DepotsCl
             "serveur a accès à la base)."
         )
 
-    try:
-        ref_localisation_df = referentiel_localisation_cached()
-    except Exception:  # noqa: BLE001
-        ref_localisation_df = pd.DataFrame(
-            columns=[
-                "CODE_BUREAU", "LIBELLE_BUREAU",
-                "CODE_REGION", "LIB_REGION",
-                "CODE_MUTUELLE", "NOM_MUTUELLE",
-            ]
-        )
-        st.warning(
-            "Impossible de charger la liste des mutuelles/agences/bureaux "
-            "depuis la base. Tu peux réessayer plus tard."
-        )
-
     st.subheader("Critères de recherche")
 
     if dates_dispo:
@@ -224,11 +244,41 @@ def _render_form_commun(titre_bouton: str, key_prefix: str) -> Optional[DepotsCl
         )
         date_arrete = None
 
-    with st.expander("Filtres avancés (facultatifs)"):
-        st.caption("Localisation (Mutuelle → Agence → Bureau)")
-        code_mutuelle, code_agence, code_bureau = render_localisation_cascade(
-            ref_localisation_df, key_prefix=key_prefix
+    par_mutuelle = st.checkbox(
+        "📊 PAR MUTUELLE — un classement top 50 distinct pour chaque "
+        "mutuelle, combinés en un seul tableau",
+        key=f"{key_prefix}par_mutuelle",
+    )
+
+    code_mutuelle = code_agence = code_bureau = None
+    if par_mutuelle:
+        st.caption(
+            "Mode « Par mutuelle » activé : le classement est recalculé "
+            "séparément pour chaque mutuelle (top 50 de chacune) — les "
+            "filtres Mutuelle/Agence/Bureau ne s'appliquent plus. À "
+            "l'export Excel, chaque mutuelle aura sa propre feuille."
         )
+    else:
+        try:
+            ref_localisation_df = referentiel_localisation_cached()
+        except Exception:  # noqa: BLE001
+            ref_localisation_df = pd.DataFrame(
+                columns=[
+                    "CODE_BUREAU", "LIBELLE_BUREAU",
+                    "CODE_REGION", "LIB_REGION",
+                    "CODE_MUTUELLE", "NOM_MUTUELLE",
+                ]
+            )
+            st.warning(
+                "Impossible de charger la liste des mutuelles/agences/bureaux "
+                "depuis la base. Tu peux réessayer plus tard."
+            )
+
+        with st.expander("Filtres avancés (facultatifs)"):
+            st.caption("Localisation (Mutuelle → Agence → Bureau)")
+            code_mutuelle, code_agence, code_bureau = render_localisation_cascade(
+                ref_localisation_df, key_prefix=key_prefix
+            )
 
     submitted = st.button(titre_bouton, width="stretch", type="primary", key=f"{key_prefix}submit")
 
@@ -240,6 +290,7 @@ def _render_form_commun(titre_bouton: str, key_prefix: str) -> Optional[DepotsCl
         code_mutuelle=code_mutuelle or None,
         code_agence=code_agence or None,
         code_bureau=code_bureau or None,
+        par_mutuelle=par_mutuelle,
     )
 
     erreur = filters.validate()
@@ -261,6 +312,29 @@ LIBELLES_COLONNES = {
     "NOM_MUTUELLE": "Mutuelle",
     "RANG": "Rang",
 }
+
+
+def _build_excel_export_classement(extraction: Extraction, df: pd.DataFrame, filters: Any) -> BytesIO:
+    """
+    Classeur à une seule feuille (comportement par défaut), sauf en mode
+    "Par mutuelle" où chaque mutuelle présente dans `df` reçoit sa propre
+    feuille (ordre d'apparition = ordre du tableau, déjà trié par
+    mutuelle puis par rang côté SQL).
+    """
+    if not getattr(filters, "par_mutuelle", False) or df.empty or "NOM_MUTUELLE" not in df.columns:
+        return Extraction.build_excel_export(extraction, df, filters)
+
+    feuilles: dict[str, pd.DataFrame] = {}
+    for nom_mutuelle, df_mutuelle in df.groupby("NOM_MUTUELLE", sort=False):
+        feuilles[str(nom_mutuelle)] = df_mutuelle
+
+    return build_excel_multi_sheet(
+        feuilles,
+        column_labels=extraction.column_labels,
+        montant_cols=extraction.montant_cols,
+        date_cols=extraction.date_cols,
+        total_cols=extraction.total_cols,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +363,11 @@ class PlusGrosDeposantsExtraction(Extraction):
         return get_classement_depots(filters, ordre="DESC", seuil_operateur=">", seuil_valeur=0)
 
     def excel_filename(self, filters: DepotsClassementFilters) -> str:
-        return f"plus_gros_deposants_{filters.date_arrete:%Y%m%d}.xlsx"
+        suffixe = "_par_mutuelle" if filters.par_mutuelle else ""
+        return f"plus_gros_deposants{suffixe}_{filters.date_arrete:%Y%m%d}.xlsx"
+
+    def build_excel_export(self, df: pd.DataFrame, filters: DepotsClassementFilters) -> BytesIO:
+        return _build_excel_export_classement(self, df, filters)
 
 
 class PlusPetitsDeposantsExtraction(Extraction):
@@ -313,4 +391,8 @@ class PlusPetitsDeposantsExtraction(Extraction):
         return get_classement_depots(filters, ordre="ASC", seuil_operateur=">=", seuil_valeur=1000)
 
     def excel_filename(self, filters: DepotsClassementFilters) -> str:
-        return f"plus_petits_deposants_{filters.date_arrete:%Y%m%d}.xlsx"
+        suffixe = "_par_mutuelle" if filters.par_mutuelle else ""
+        return f"plus_petits_deposants{suffixe}_{filters.date_arrete:%Y%m%d}.xlsx"
+
+    def build_excel_export(self, df: pd.DataFrame, filters: DepotsClassementFilters) -> BytesIO:
+        return _build_excel_export_classement(self, df, filters)

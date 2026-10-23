@@ -25,9 +25,12 @@ le menu, avec formulaire, tableau et export Excel gérés génériquement.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from io import BytesIO
 from typing import Any, Optional
 
 import pandas as pd
+
+from export_excel import build_excel
 
 
 class Extraction(ABC):
@@ -60,6 +63,25 @@ class Extraction(ABC):
     def excel_filename(self, filters: Any) -> str:
         """Nom du fichier Excel proposé au téléchargement."""
         return f"{self.id}.xlsx"
+
+    def build_excel_export(self, df: pd.DataFrame, filters: Any) -> BytesIO:
+        """
+        Construit le classeur Excel proposé au téléchargement à partir du
+        résultat `df`. Par défaut, un classeur à une seule feuille (voir
+        `export_excel.build_excel`). Une extraction peut surcharger cette
+        méthode pour produire un classeur à plusieurs feuilles — ex. les
+        classements (Plus gros/petits consommateurs, Plus gros
+        contentieux, Plus gros/petits déposants) en mode "Par mutuelle",
+        qui exportent une feuille par mutuelle.
+        """
+        return build_excel(
+            df,
+            column_labels=self.column_labels,
+            montant_cols=self.montant_cols,
+            date_cols=self.date_cols,
+            total_cols=self.total_cols,
+            sheet_name=self.label,
+        )
 
     def render_resume_extra(self, df: pd.DataFrame, filters: Any) -> None:
         """
