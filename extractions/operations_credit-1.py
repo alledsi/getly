@@ -17,8 +17,8 @@ celui de la règle métier (non modifiable depuis le formulaire).
 Champs obligatoires : au moins un code opération (choix multiple parmi
 les 6 codes concernés), date début, date fin. Filtres facultatifs :
 localisation hiérarchique (Mutuelle -> Agence -> Bureau), compte général,
-matricule client, code type de compte (liste déroulante restreinte aux
-seuls types concernés : 810, 811, 853, 323, 800).
+matricule client, code(s) type de compte (choix multiple restreint aux
+seuls types concernés : 810, 811, 853, 323, 800), numéro prêt, échéance.
 
 Les colonnes affichées reproduisent exactement la requête fournie par
 l'utilisateur (ne pas en ajouter/retirer) : seule la clause des filtres
@@ -68,6 +68,8 @@ class OperationsCreditFilters:
     compte_general: Optional[str] = None
     matricule_client: Optional[str] = None
     code_type_compte: Optional[list[str]] = None
+    no_pret: Optional[str] = None
+    no_echeance: Optional[str] = None
 
     def validate(self) -> Optional[str]:
         if not self.code_operations:
@@ -205,6 +207,18 @@ def get_operations_credit(filters: OperationsCreditFilters) -> pd.DataFrame:
         for i, code in enumerate(filters.code_type_compte):
             params[f"code_type_compte_{i}"] = code
 
+    # no_pret_dos / no_echeance sont des colonnes dérivées de la CTE "ecr"
+    # (voir _build_sql) : on les filtre donc ici, dans la requête externe,
+    # avec l'alias "ecr." (contrairement aux codes opération/sens ci-dessus,
+    # filtrés à l'intérieur de la CTE avec l'alias "e.").
+    if filters.no_pret:
+        filtres_optionnels += " AND ecr.no_pret_dos = :no_pret"
+        params["no_pret"] = filters.no_pret.strip()
+
+    if filters.no_echeance:
+        filtres_optionnels += " AND ecr.no_echeance = :no_echeance"
+        params["no_echeance"] = filters.no_echeance.strip()
+
     sql = _build_sql(condition_codes_sql, filtres_optionnels)
 
     df = fetch_df(sql, params)
@@ -333,6 +347,12 @@ class OperationsCreditExtraction(Extraction):
                     key="opc_code_type_compte",
                 )
 
+            c4, c5 = st.columns(2)
+            with c4:
+                no_pret = st.text_input("Numéro prêt", key="opc_no_pret")
+            with c5:
+                no_echeance = st.text_input("Échéance", key="opc_no_echeance")
+
             st.caption("Localisation (Mutuelle → Agence → Bureau)")
             code_mutuelle, code_agence, code_bureau = render_localisation_cascade(
                 ref_localisation_df, key_prefix="opc_"
@@ -355,6 +375,8 @@ class OperationsCreditExtraction(Extraction):
             compte_general=compte_general or None,
             matricule_client=matricule_client or None,
             code_type_compte=code_type_compte or None,
+            no_pret=no_pret or None,
+            no_echeance=no_echeance or None,
         )
 
         erreur = filters.validate()
