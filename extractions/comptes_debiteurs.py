@@ -39,7 +39,7 @@ from extractions.reference_data import (
 class ComptesDebiteursFilters:
     date_arrete: Optional[dt.date]
     matricule_client: Optional[str] = None
-    code_type_compte: Optional[str] = None
+    code_type_compte: Optional[list[str]] = None
     status_compte: Optional[str] = None
     code_mutuelle: Optional[str] = None
     code_agence: Optional[str] = None
@@ -139,8 +139,12 @@ def get_comptes_debiteurs(filters: ComptesDebiteursFilters) -> pd.DataFrame:
         params["matricule_client"] = filters.matricule_client.strip()
 
     if filters.code_type_compte:
-        sql += " AND rpt.CODE_TYPE_CPT = :code_type_compte"
-        params["code_type_compte"] = filters.code_type_compte.strip()
+        placeholders_type = ", ".join(
+            f":code_type_compte_{i}" for i in range(len(filters.code_type_compte))
+        )
+        sql += f" AND rpt.CODE_TYPE_CPT IN ({placeholders_type})"
+        for i, code in enumerate(filters.code_type_compte):
+            params[f"code_type_compte_{i}"] = code
 
     if filters.status_compte:
         sql += " AND rpt.STATUS_COMPTE = :status_compte"
@@ -278,8 +282,11 @@ class ComptesDebiteursExtraction(Extraction):
             with c1:
                 matricule_client = st.text_input("Matricule client", max_chars=8)
             with c2:
-                code_type_compte = select_valeur(
-                    "Code type compte", valeurs_code_type_compte, "Tous", "cd_code_type_compte", max_chars=3
+                code_type_compte = st.multiselect(
+                    "Code(s) type compte",
+                    options=valeurs_code_type_compte,
+                    placeholder="Tous",
+                    key="cd_code_type_compte",
                 )
             with c3:
                 status_compte = select_valeur(

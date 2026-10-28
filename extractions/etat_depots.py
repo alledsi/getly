@@ -44,7 +44,7 @@ class EtatDepotsFilters:
     matricule_client: Optional[str] = None
     compte_general: Optional[str] = None
     no_compte: Optional[str] = None
-    code_type_compte: Optional[str] = None
+    code_type_compte: Optional[list[str]] = None
     status_compte: Optional[str] = None
     exclure_soldes_nuls: bool = False
     code_mutuelle: Optional[str] = None
@@ -156,8 +156,12 @@ def get_etat_depots(filters: EtatDepotsFilters) -> pd.DataFrame:
         params["no_compte"] = filters.no_compte.strip()
 
     if filters.code_type_compte:
-        sql += " AND d.CODE_TYPE_COMPTE = :code_type_compte"
-        params["code_type_compte"] = filters.code_type_compte.strip()
+        placeholders_type = ", ".join(
+            f":code_type_compte_{i}" for i in range(len(filters.code_type_compte))
+        )
+        sql += f" AND d.CODE_TYPE_COMPTE IN ({placeholders_type})"
+        for i, code in enumerate(filters.code_type_compte):
+            params[f"code_type_compte_{i}"] = code
 
     if filters.status_compte:
         sql += " AND d.STATUS_COMPTE = :status_compte"
@@ -309,8 +313,11 @@ class EtatDepotsExtraction(Extraction):
                 )
             with c2:
                 no_compte = st.text_input("N° compte", max_chars=12)
-                code_type_compte = select_valeur(
-                    "Code type compte", valeurs_code_type_compte, "Tous", "code_type_compte", max_chars=3
+                code_type_compte = st.multiselect(
+                    "Code(s) type compte",
+                    options=valeurs_code_type_compte,
+                    placeholder="Tous",
+                    key="etat_depots_code_type_compte",
                 )
             with c3:
                 status_compte = select_valeur(
