@@ -161,14 +161,19 @@ def get_operations_credit(filters: OperationsCreditFilters) -> pd.DataFrame:
     codes_credit_choisis = [c for c in filters.code_operations if c in _CODES_OPERATION_CREDIT]
     rembours_choisi = _CODE_OPERATION_REMBOURSEMENT in filters.code_operations
 
+    # NB : ces branches sont injectées dans le WHERE de la définition de la
+    # CTE "ecr" elle-même (voir _build_sql) — à cet endroit, l'alias valide
+    # pour la table ECRITURE est "e" (celui du FROM ecriture e), pas "ecr"
+    # (le nom de la CTE n'est pas visible à l'intérieur de sa propre
+    # définition). Utiliser "ecr." ici provoque ORA-00904.
     branches = []
     if codes_credit_choisis:
         placeholders = ", ".join(f":cop_c_{i}" for i in range(len(codes_credit_choisis)))
-        branches.append(f"(ecr.code_oper IN ({placeholders}) AND ecr.sens_ecr = 'C')")
+        branches.append(f"(e.code_oper IN ({placeholders}) AND e.sens_ecr = 'C')")
         for i, code in enumerate(codes_credit_choisis):
             params[f"cop_c_{i}"] = code
     if rembours_choisi:
-        branches.append("(ecr.code_oper = :cop_d AND ecr.sens_ecr = 'D')")
+        branches.append("(e.code_oper = :cop_d AND e.sens_ecr = 'D')")
         params["cop_d"] = _CODE_OPERATION_REMBOURSEMENT
     condition_codes_sql = " OR ".join(branches)
 
