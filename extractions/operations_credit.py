@@ -3,9 +3,14 @@ Extraction : Opérations sur le crédit.
 
 Écritures de décaissement et de remboursement liées à un dossier de prêt
 (table ECRITURE), rattachées à leur prêt via le n° de dossier
-(`NO_DOSSIER`, dont les positions 8-13 encodent le n° de prêt et la
-position 16+ le n° d'échéance — lignes dont le n° de dossier ne respecte
-pas ce format exclues via REGEXP_LIKE).
+(`NO_DOSSIER`, dont les positions 8-13 encodent le n° de prêt et, pour les
+remboursements seulement, la position 16+ le n° d'échéance — lignes dont
+le n° de dossier ne respecte pas le format "positions 8-13 = 6 chiffres"
+exclues via REGEXP_LIKE). Un décaissement (NO_DOSSIER de 13 caractères,
+ex. "1000901002733") n'a pas encore d'échéance : la colonne "Echeance"
+est alors vide pour ces lignes, ce n'est pas une exclusion — seul un
+n° de dossier dont la partie après la position 16 existe mais contient
+autre chose que des chiffres est rejeté.
 
 Règle métier reprise telle quelle de la requête fournie par
 l'utilisateur : les codes opération 066/041/043/046/054 ne comptent que
@@ -95,7 +100,8 @@ def _build_sql(condition_codes_sql: str, filtres_optionnels: str) -> str:
                    TO_NUMBER(SUBSTR(e.no_dossier, 16))   AS no_echeance
             FROM ecriture e
             WHERE REGEXP_LIKE(SUBSTR(e.no_dossier, 8, 6), '^[0-9]{{6}}$')
-              AND REGEXP_LIKE(SUBSTR(e.no_dossier, 16), '^[0-9]+$')
+              AND (SUBSTR(e.no_dossier, 16) IS NULL
+                   OR REGEXP_LIKE(SUBSTR(e.no_dossier, 16), '^[0-9]+$'))
               AND e.d_ecr >= :date_debut
               AND e.d_ecr <  :date_fin_exclusive
               AND ({condition_codes_sql})
