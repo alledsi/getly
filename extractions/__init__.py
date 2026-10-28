@@ -15,6 +15,7 @@ from extractions.clients_actifs import ClientsActifsExtraction
 from extractions.balance_agee import BalanceAgeeExtraction
 from extractions.journal_ecritures import JournalEcrituresExtraction
 from extractions.recapitulatif_ecritures import RecapitulatifEcrituresExtraction
+from extractions.operations_credit import OperationsCreditExtraction
 from extractions.etat_depots import EtatDepotsExtraction
 from extractions.depots_comptes_courants import DepotsComptesCourantsExtraction
 from extractions.depots_epargne import DepotsEpargneExtraction
@@ -39,6 +40,7 @@ EXTRACTIONS: list[Extraction] = [
     BalanceAgeeExtraction(),
     JournalEcrituresExtraction(),
     RecapitulatifEcrituresExtraction(),
+    OperationsCreditExtraction(),
     EcrituresDoublonsSuspectesExtraction(),
     HistMailsAlertesExtraction(),
     EtatDepotsExtraction(),
