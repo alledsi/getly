@@ -153,6 +153,21 @@ _COLONNES_FINALES = [
 ]
 
 
+def _entier_propre(valeur):
+    """Formate un NUMBER Oracle (float/Decimal, parfois absent) en chaîne
+    entière sans décimale ("23" plutôt que "23.0"). Oracle/oracledb
+    renvoie no_pret_dos/no_echeance comme des nombres à virgule flottante
+    dès qu'une valeur manque ailleurs dans la colonne — ce formatage évite
+    de les afficher avec un ".0" trompeur. Une valeur déjà non numérique
+    (ex. "-") est laissée inchangée."""
+    if pd.isna(valeur):
+        return valeur
+    try:
+        return str(int(valeur))
+    except (TypeError, ValueError):
+        return valeur
+
+
 def get_operations_credit(filters: OperationsCreditFilters) -> pd.DataFrame:
     """Construit et exécute la requête des opérations sur le crédit selon
     les filtres du formulaire."""
@@ -237,6 +252,13 @@ def get_operations_credit(filters: OperationsCreditFilters) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=_COLONNES_FINALES)
     df = df[_COLONNES_FINALES].copy()
+
+    # Numero pret / Echeance arrivent d'Oracle comme NUMBER mais pandas les
+    # convertit en float64 dès qu'une valeur manque dans la colonne (ex.
+    # 23.0 au lieu de 23) — reformatés en entier "propre" avant tout le
+    # reste.
+    df["Numero pret"] = df["Numero pret"].apply(_entier_propre)
+    df["Echeance"] = df["Echeance"].apply(_entier_propre)
 
     # Demande explicite de l'utilisateur : pour le code opération 066, ne
     # pas afficher de n° prêt / échéance (même quand techniquement
