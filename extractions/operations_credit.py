@@ -28,6 +28,12 @@ seuls types concernés : 810, 811, 853, 323, 800), numéro prêt, échéance.
 Les colonnes affichées reproduisent exactement la requête fournie par
 l'utilisateur (ne pas en ajouter/retirer) : seule la clause des filtres
 change selon ce qui est choisi dans le formulaire.
+
+Cas particulier du code opération 066 : à la demande de l'utilisateur,
+les colonnes "Numero pret" et "Echeance" sont remplacées par "-" pour ces
+lignes (même si le n° de prêt est techniquement disponible dans le
+NO_DOSSIER), l'échéance n'ayant de toute façon pas de sens pour un
+décaissement.
 """
 
 from __future__ import annotations
@@ -230,7 +236,14 @@ def get_operations_credit(filters: OperationsCreditFilters) -> pd.DataFrame:
     df = fetch_df(sql, params)
     if df.empty:
         return pd.DataFrame(columns=_COLONNES_FINALES)
-    return df[_COLONNES_FINALES]
+    df = df[_COLONNES_FINALES].copy()
+
+    # Demande explicite de l'utilisateur : pour le code opération 066, ne
+    # pas afficher de n° prêt / échéance (même quand techniquement
+    # disponibles), remplacés par "-".
+    df.loc[df["Code opération"] == "066", ["Numero pret", "Echeance"]] = "-"
+
+    return df
 
 
 def get_operations_credit_libelles() -> pd.DataFrame:
