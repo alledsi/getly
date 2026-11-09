@@ -22,8 +22,19 @@ n'est déclarée dans `total_cols` ici (pas de ligne de total générique
 ajoutée en bas du tableau/export Excel) — en ajouter une sommerait aussi
 les lignes de sous-total déjà présentes, doublant les montants.
 
-Les colonnes affichées reproduisent exactement la requête fournie par
-l'utilisateur (ne pas en ajouter/retirer), accents et casse inclus.
+Les colonnes affichées reproduisent la requête fournie par l'utilisateur,
+accents et casse inclus, à une correction près (signalée par
+l'utilisateur le 09/11/2026) : sur la requête d'origine, les colonnes
+"Nom du client"/"Date Imp"/"Numero compte"/"Date Opp"/"Durée Retard"
+étaient un simple MAX(...) sur chaque groupe ROLLUP — correct pour une
+ligne "détail" (un seul client dans le groupe, donc MAX() renvoie sa
+valeur), mais trompeur sur une ligne "TOTAL <tranche>" (plusieurs
+clients dans le groupe : MAX() y affichait arbitrairement le nom/la
+valeur du client classé en dernier par ordre alphabétique/numérique,
+laissant croire que la ligne de total concernait ce client précis).
+Ces 5 colonnes sont donc vides sur les lignes "TOTAL <tranche>" (via
+`CASE WHEN GROUPING(matricule) = 1 THEN NULL ELSE MAX(...) END`), tout
+en gardant exactement le même calcul qu'avant sur les lignes détail.
 """
 
 from __future__ import annotations
@@ -120,13 +131,13 @@ _BASE_SQL = """
         intitule                                    AS "Intitulé Provision",
         taux / 100                                  AS "Taux de Provision",
         CASE WHEN GROUPING(matricule) = 1 THEN 'TOTAL ' || intitule ELSE matricule END AS "Matricule",
-        MAX(nom_client)                             AS "Nom du client",
-        MAX(date_imp)                               AS "Date Imp",
-        MAX(numero_compte)                          AS "Numero compte",
-        MAX(date_opp)                               AS "Date Opp",
+        CASE WHEN GROUPING(matricule) = 1 THEN NULL ELSE MAX(nom_client)    END AS "Nom du client",
+        CASE WHEN GROUPING(matricule) = 1 THEN NULL ELSE MAX(date_imp)      END AS "Date Imp",
+        CASE WHEN GROUPING(matricule) = 1 THEN NULL ELSE MAX(numero_compte) END AS "Numero compte",
+        CASE WHEN GROUPING(matricule) = 1 THEN NULL ELSE MAX(date_opp)      END AS "Date Opp",
         ROUND(SUM(cap_declasse), 2)                 AS "Cap. Déclassé",
         ROUND(SUM(solde_capital), 2)                AS "Solde Capital",
-        MAX(duree_retard)                           AS "Durée Retard",
+        CASE WHEN GROUPING(matricule) = 1 THEN NULL ELSE MAX(duree_retard)  END AS "Durée Retard",
         ROUND(SUM(solde_capital * taux / 100), 2)   AS "Montant Provisions"
     FROM det
     LEFT JOIN bureau   b   ON b.code_bureau = det.code_bureau
