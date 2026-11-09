@@ -48,6 +48,15 @@ def _write_formatted_sheet(
     df_export.to_excel(writer, index=False, sheet_name=sheet_name)
     ws = writer.sheets[sheet_name]
 
+    # Filet de sécurité contre un bug connu pandas/openpyxl ("IndexError: At
+    # least one sheet must be visible" au moment d'enregistrer le classeur) :
+    # selon la version installée, la feuille créée par to_excel() peut se
+    # retrouver marquée autrement que "visible". On le force explicitement
+    # pour que l'enregistrement ne puisse pas échouer sur ce point, quelle
+    # que soit la version d'openpyxl côté serveur.
+    ws.sheet_state = "visible"
+    writer.book.active = 0
+
     n_rows, n_cols = df_export.shape
 
     # --- En-têtes ---

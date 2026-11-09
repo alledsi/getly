@@ -259,11 +259,22 @@ if res_key in st.session_state:
             column_config=column_config,
         )
 
-        excel_buffer = extraction.build_excel_export(df, filtres_actifs)
-        st.download_button(
-            label="⬇️ Télécharger en Excel",
-            data=excel_buffer,
-            file_name=extraction.excel_filename(filtres_actifs),
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            width="stretch",
-        )
+        try:
+            excel_buffer = extraction.build_excel_export(df, filtres_actifs)
+        except Exception as exc:  # noqa: BLE001
+            # Le tableau ci-dessus reste affiché même si la génération du
+            # fichier Excel échoue (ex. souci de version openpyxl côté
+            # serveur) — on affiche l'erreur sans faire planter toute la
+            # page, pour que le bouton "Télécharger" réapparaisse si on
+            # relance l'extraction (bouton ci-dessus).
+            excel_buffer = None
+            st.error(f"Impossible de générer le fichier Excel : {exc}")
+
+        if excel_buffer is not None:
+            st.download_button(
+                label="⬇️ Télécharger en Excel",
+                data=excel_buffer,
+                file_name=extraction.excel_filename(filtres_actifs),
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                width="stretch",
+            )
