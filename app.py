@@ -259,17 +259,42 @@ if res_key in st.session_state:
             column_config=column_config,
         )
 
+        gros_resultat = len(df) > 100_000
+        col_csv, col_excel = st.columns(2)
+
+        # --- CSV : affiché en premier, prêt quasi instantanément même sur
+        # un très gros résultat (~40x plus rapide que l'Excel, pas de mise
+        # en forme cellule par cellule) — pour une extraction rapide quand
+        # on n'a pas besoin de la mise en forme Excel (en-têtes colorés,
+        # feuilles par agence/mutuelle, ligne de total).
         try:
-            # Pour un très gros résultat (plusieurs centaines de milliers
-            # de lignes, ex. "État des dépôts" sans filtre), l'écriture du
-            # fichier Excel peut prendre plusieurs minutes (openpyxl écrit
-            # cellule par cellule) — un message explicite évite de penser
-            # que la page est bloquée pendant ce temps.
+            csv_bytes = extraction.build_csv_export(df, filtres_actifs)
+        except Exception as exc:  # noqa: BLE001
+            csv_bytes = None
+            st.error(f"Impossible de générer le fichier CSV : {exc}")
+
+        if csv_bytes is not None:
+            with col_csv:
+                st.download_button(
+                    label="⚡ Télécharger en CSV (rapide)",
+                    data=csv_bytes,
+                    file_name=extraction.csv_filename(filtres_actifs),
+                    mime="text/csv",
+                    width="stretch",
+                )
+
+        # --- Excel : mis en forme, mais lent sur un gros volume (openpyxl
+        # écrit cellule par cellule — plusieurs minutes possibles au-delà
+        # de quelques centaines de milliers de lignes), d'où le message
+        # explicite pour ne pas laisser penser que la page est bloquée.
+        try:
             spinner_msg = "Génération du fichier Excel en cours..."
-            if len(df) > 100_000:
+            if gros_resultat:
                 spinner_msg = (
                     "Génération du fichier Excel en cours — ce résultat est "
-                    "volumineux, cela peut prendre plusieurs minutes..."
+                    "volumineux, cela peut prendre plusieurs minutes "
+                    "(le CSV ci-contre est prêt tout de suite si besoin "
+                    "d'extraire rapidement)..."
                 )
             with st.spinner(spinner_msg):
                 excel_buffer = extraction.build_excel_export(df, filtres_actifs)
@@ -283,10 +308,11 @@ if res_key in st.session_state:
             st.error(f"Impossible de générer le fichier Excel : {exc}")
 
         if excel_buffer is not None:
-            st.download_button(
-                label="⬇️ Télécharger en Excel",
-                data=excel_buffer,
-                file_name=extraction.excel_filename(filtres_actifs),
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                width="stretch",
-            )
+            with col_excel:
+                st.download_button(
+                    label="⬇️ Télécharger en Excel",
+                    data=excel_buffer,
+                    file_name=extraction.excel_filename(filtres_actifs),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    width="stretch",
+                )

@@ -30,7 +30,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from export_excel import build_excel
+from export_excel import build_csv, build_excel
 
 
 class Extraction(ABC):
@@ -63,6 +63,21 @@ class Extraction(ABC):
     def excel_filename(self, filters: Any) -> str:
         """Nom du fichier Excel proposé au téléchargement."""
         return f"{self.id}.xlsx"
+
+    def csv_filename(self, filters: Any) -> str:
+        """Nom du fichier CSV proposé au téléchargement."""
+        return f"{self.id}.csv"
+
+    def build_csv_export(self, df: pd.DataFrame, filters: Any) -> bytes:
+        """
+        Construit l'export CSV proposé au téléchargement — alternative
+        rapide à l'export Excel pour un gros résultat (pas de mise en
+        forme, juste les données, voir `export_excel.build_csv`). Par
+        défaut, mêmes libellés de colonnes que l'export Excel
+        (`column_labels`) ; une extraction peut surcharger cette méthode
+        si elle a besoin d'un comportement différent.
+        """
+        return build_csv(df, column_labels=self.column_labels)
 
     def build_excel_export(self, df: pd.DataFrame, filters: Any) -> BytesIO:
         """
