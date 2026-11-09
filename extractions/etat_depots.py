@@ -19,12 +19,14 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
+from io import BytesIO
 from typing import Optional
 
 import pandas as pd
 import streamlit as st
 
 from db import fetch_df
+from export_excel import build_excel_multi_sheet
 from extractions.base import Extraction
 from extractions.reference_data import (
     dates_arrete_etat_depots_cached,
@@ -359,3 +361,32 @@ class EtatDepotsExtraction(Extraction):
 
     def excel_filename(self, filters: EtatDepotsFilters) -> str:
         return f"etat_depots_{filters.date_arrete:%Y%m%d}.xlsx"
+
+    def build_excel_export(self, df: pd.DataFrame, filters: EtatDepotsFilters) -> BytesIO:
+        """
+        Classeur Excel réparti par agence (une feuille par agence présente
+        dans le résultat) plutôt qu'une seule feuille pour tout le
+        résultat. Sans filtre, "État des dépôts" peut remonter plus d'un
+        million de lignes (tous les comptes de dépôt du réseau) — au-delà
+        de ~1 048 574 lignes, une seule feuille Excel ne peut de toute
+        façon plus contenir le résultat (limite dure d'Excel), et même en
+        dessous de cette limite, un classeur organisé par agence reste
+        plus exploitable qu'un bloc unique de centaines de milliers de
+        lignes. Si une agence dépasse malgré tout la limite par feuille,
+        `build_excel_multi_sheet` la répartit elle-même sur plusieurs
+        feuilles supplémentaires (voir `export_excel._write_chunked`).
+        """
+        if df.empty or "NOM_AGENCE" not in df.columns:
+            return super().build_excel_export(df, filters)
+
+        feuilles: dict[str, pd.DataFrame] = {}
+        for nom_agence, df_agence in df.groupby("NOM_AGENCE", sort=False):
+            feuilles[str(nom_agence)] = df_agence
+
+        return build_excel_multi_sheet(
+            feuilles,
+            column_labels=self.column_labels,
+            montant_cols=self.montant_cols,
+            date_cols=self.date_cols,
+            total_cols=self.total_cols,
+        )

@@ -26,6 +26,14 @@ EN_TETE_POLICE = Font(color="FFFFFF", bold=True)
 TOTAL_FOND = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
 TOTAL_POLICE = Font(bold=True)
 
+# Limite dure d'Excel : 1 048 576 lignes par feuille. On réserve la ligne
+# 1 pour l'en-tête et une ligne de plus pour une éventuelle ligne TOTAL
+# (ajoutée après les données si total_cols est fourni) — donc 1 048 574
+# lignes de données maximum par feuille, que cette feuille ait ou non une
+# ligne de total (constante unique, plus simple qu'un calcul conditionnel
+# par appel).
+_EXCEL_MAX_DATA_ROWS = 1_048_574
+
 
 def _write_formatted_sheet(
     writer,
@@ -47,13 +55,6 @@ def _write_formatted_sheet(
     df_export = df.rename(columns=column_labels)
     df_export.to_excel(writer, index=False, sheet_name=sheet_name)
     ws = writer.sheets[sheet_name]
-
-    # Filet de sécurité contre un bug connu pandas/openpyxl ("IndexError: At
-    # least one sheet must be visible" au moment d'enregistrer le classeur) :
-    # selon la version installée, la feuille créée par to_excel() peut se
-    # retrouver marquée autrement que "visible". On le force explicitement
-    # pour que l'enregistrement ne puisse pas échouer sur ce point, quelle
-    # que soit la version d'openpyxl côté serveur.
     ws.sheet_state = "visible"
     writer.book.active = 0
 
@@ -100,6 +101,78 @@ def _write_formatted_sheet(
                 cell.number_format = "#,##0.00"
 
 
+def _nom_feuille_unique(nom: str, deja_utilises: set[str]) -> str:
+    """
+    Nettoie un nom de feuille pour respecter les contraintes Excel (31
+    caractères max, caractères \\ / ? * [ ] : interdits) et garantit son
+    unicité dans le classeur (suffixe numérique en cas de collision après
+    troncature, ex. deux mutuelles dont le nom ne diffère qu'après le
+    31e caractère — ou plusieurs morceaux d'un même résultat trop
+    volumineux pour une seule feuille, voir `_write_chunked`).
+    """
+    nettoye = re.sub(r"[\\/?*\[\]:]", "-", str(nom)).strip() or "Feuille"
+    nettoye = nettoye[:31]
+    base = nettoye
+    i = 2
+    while nettoye in deja_utilises:
+        suffixe = f" ({i})"
+        nettoye = base[: 31 - len(suffixe)] + suffixe
+        i += 1
+    deja_utilises.add(nettoye)
+    return nettoye
+
+
+def _write_chunked(
+    writer,
+    df: pd.DataFrame,
+    *,
+    base_sheet_name: str,
+    deja_utilises: set[str],
+    column_labels: dict[str, str],
+    montant_cols: set[str],
+    date_cols: set[str],
+    total_cols: set[str],
+) -> None:
+    """Écrit `df` sur une ou plusieurs feuilles nommées à partir de
+    `base_sheet_name` (`_nom_feuille_unique` donnant `base_sheet_name`,
+    puis `base_sheet_name (2)`, `(3)`... à chaque collision).
+
+    Un classeur Excel ne peut pas contenir plus de 1 048 576 lignes par
+    feuille (en-tête comprise) — `to_excel()` refuse silencieusement
+    d'écrire au-delà, ce qui fait ensuite échouer l'enregistrement du
+    classeur avec une erreur openpyxl trompeuse ("At least one sheet must
+    be visible", faute de feuille créée). Un résultat trop volumineux est
+    donc automatiquement réparti sur plusieurs feuilles plutôt que de
+    faire planter l'export — chaque feuille garde sa propre ligne de
+    total (si `total_cols` est fourni), il n'y a pas de total combiné
+    entre les feuilles."""
+    if len(df) <= _EXCEL_MAX_DATA_ROWS:
+        sheet_name = _nom_feuille_unique(base_sheet_name, deja_utilises)
+        _write_formatted_sheet(
+            writer,
+            df,
+            sheet_name=sheet_name,
+            column_labels=column_labels,
+            montant_cols=montant_cols,
+            date_cols=date_cols,
+            total_cols=total_cols,
+        )
+        return
+
+    for i in range(0, len(df), _EXCEL_MAX_DATA_ROWS):
+        morceau = df.iloc[i : i + _EXCEL_MAX_DATA_ROWS]
+        sheet_name = _nom_feuille_unique(base_sheet_name, deja_utilises)
+        _write_formatted_sheet(
+            writer,
+            morceau,
+            sheet_name=sheet_name,
+            column_labels=column_labels,
+            montant_cols=montant_cols,
+            date_cols=date_cols,
+            total_cols=total_cols,
+        )
+
+
 def build_excel(
     df: pd.DataFrame,
     *,
@@ -120,13 +193,17 @@ def build_excel(
     - total_cols : sous-ensemble de montant_cols pour lesquelles une ligne
       de total (somme) est ajoutée en bas du tableau.
     - sheet_name : nom de l'onglet (max 31 caractères, contrainte Excel).
+      Si `df` dépasse 1 048 575 lignes, le résultat est automatiquement
+      réparti sur plusieurs feuilles (`sheet_name`, `sheet_name (2)`...).
     """
     buffer = BytesIO()
+    deja_utilises: set[str] = set()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        _write_formatted_sheet(
+        _write_chunked(
             writer,
             df,
-            sheet_name=(sheet_name or "Extraction")[:31],
+            base_sheet_name=(sheet_name or "Extraction")[:31],
+            deja_utilises=deja_utilises,
             column_labels=column_labels or {},
             montant_cols=montant_cols or set(),
             date_cols=date_cols or set(),
@@ -134,26 +211,6 @@ def build_excel(
         )
     buffer.seek(0)
     return buffer
-
-
-def _nom_feuille_unique(nom: str, deja_utilises: set[str]) -> str:
-    """
-    Nettoie un nom de feuille pour respecter les contraintes Excel (31
-    caractères max, caractères \\ / ? * [ ] : interdits) et garantit son
-    unicité dans le classeur (suffixe numérique en cas de collision après
-    troncature, ex. deux mutuelles dont le nom ne diffère qu'après le
-    31e caractère).
-    """
-    nettoye = re.sub(r"[\\/?*\[\]:]", "-", str(nom)).strip() or "Feuille"
-    nettoye = nettoye[:31]
-    base = nettoye
-    i = 2
-    while nettoye in deja_utilises:
-        suffixe = f" ({i})"
-        nettoye = base[: 31 - len(suffixe)] + suffixe
-        i += 1
-    deja_utilises.add(nettoye)
-    return nettoye
 
 
 def build_excel_multi_sheet(
@@ -169,7 +226,8 @@ def build_excel_multi_sheet(
     entrée de `sheets` (ex. une feuille par mutuelle pour les classements
     en mode "Par mutuelle"), dans l'ordre d'itération du dict, chaque
     feuille recevant le même formatage (en-têtes, colonnes montant/date,
-    ligne de total).
+    ligne de total). Chaque entrée est elle-même répartie sur plusieurs
+    feuilles si elle dépasse 1 048 575 lignes (voir `_write_chunked`).
     """
     column_labels = column_labels or {}
     montant_cols = montant_cols or set()
@@ -180,11 +238,11 @@ def build_excel_multi_sheet(
     deja_utilises: set[str] = set()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         for nom, df in sheets.items():
-            sheet_name = _nom_feuille_unique(nom, deja_utilises)
-            _write_formatted_sheet(
+            _write_chunked(
                 writer,
                 df,
-                sheet_name=sheet_name,
+                base_sheet_name=str(nom)[:31],
+                deja_utilises=deja_utilises,
                 column_labels=column_labels,
                 montant_cols=montant_cols,
                 date_cols=date_cols,
