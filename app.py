@@ -260,7 +260,19 @@ if res_key in st.session_state:
         )
 
         try:
-            excel_buffer = extraction.build_excel_export(df, filtres_actifs)
+            # Pour un très gros résultat (plusieurs centaines de milliers
+            # de lignes, ex. "État des dépôts" sans filtre), l'écriture du
+            # fichier Excel peut prendre plusieurs minutes (openpyxl écrit
+            # cellule par cellule) — un message explicite évite de penser
+            # que la page est bloquée pendant ce temps.
+            spinner_msg = "Génération du fichier Excel en cours..."
+            if len(df) > 100_000:
+                spinner_msg = (
+                    "Génération du fichier Excel en cours — ce résultat est "
+                    "volumineux, cela peut prendre plusieurs minutes..."
+                )
+            with st.spinner(spinner_msg):
+                excel_buffer = extraction.build_excel_export(df, filtres_actifs)
         except Exception as exc:  # noqa: BLE001
             # Le tableau ci-dessus reste affiché même si la génération du
             # fichier Excel échoue (ex. souci de version openpyxl côté
