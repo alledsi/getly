@@ -35,18 +35,32 @@ laissant croire que la ligne de total concernait ce client précis).
 Ces 5 colonnes sont donc vides sur les lignes "TOTAL <tranche>" (via
 `CASE WHEN GROUPING(matricule) = 1 THEN NULL ELSE MAX(...) END`), tout
 en gardant exactement le même calcul qu'avant sur les lignes détail.
+
+Export Excel (ajouté le 10/11/2026, à la demande de l'utilisateur) : une
+feuille "Récap" est ajoutée en première position, avant la feuille de
+détail — 4 petits tableaux empilés (total par type de provision, par
+mutuelle, par agence, par bureau), chacun une simple liste valeur/montant
++ une ligne "TOTAL GÉNÉRAL" (pas de tableau croisé type × localisation,
+choix explicite de l'utilisateur). Alimentée par une requête séparée
+(`get_etat_provisions_recap`/`_RECAP_SQL`) réutilisant la même CTE "det"
+que la requête détail (`_DET_CTE_SQL`, désormais factorisée) et les mêmes
+filtres (`_construire_filtres`), mais avec une agrégation simple (sans
+ROLLUP) par mutuelle/agence/bureau/type de provision — construction des
+4 tableaux empilés côté Python (pandas), pas en SQL.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
+from io import BytesIO
 from typing import Optional
 
 import pandas as pd
 import streamlit as st
 
 from db import fetch_df
+from export_excel import build_excel_with_recap
 from extractions.base import Extraction
 from extractions.reference_data import (
     dates_arrete_enc_brut_cached,
@@ -90,7 +104,12 @@ class EtatProvisionsFilters:
 # Accès aux données
 # ---------------------------------------------------------------------------
 
-_BASE_SQL = """
+# CTE "det" partagée entre la requête détail (_BASE_SQL, avec son ROLLUP
+# par client) et la requête récap (_RECAP_SQL, simple agrégation par
+# mutuelle/agence/bureau/type de provision) — factorisée ici pour que les
+# deux requêtes restent toujours cohérentes entre elles (même périmètre
+# de lignes, même calcul du taux/intitulé/montant).
+_DET_CTE_SQL = """
     WITH det AS (
         SELECT
             CASE WHEN eb.DUREE_IMP <  180 THEN 1
@@ -127,6 +146,9 @@ _BASE_SQL = """
           AND eb.DUREE_IMP >= 90
           AND eb.DUREE_IMP <  720
     )
+"""
+
+_BASE_SQL = _DET_CTE_SQL + """
     SELECT
         intitule                                    AS "Intitulé Provision",
         taux / 100                                  AS "Taux de Provision",
@@ -149,6 +171,32 @@ _BASE_SQL = """
     ORDER BY ordre, GROUPING(matricule), SUM(solde_capital) DESC
 """
 
+# Requête récap (feuille "Récap" de l'export Excel, demandée le
+# 10/11/2026) : une ligne par combinaison (mutuelle, agence, bureau, type
+# de provision) avec le montant de provision total — agrégation simple
+# (pas de ROLLUP), ensuite recombinée côté Python (pandas) en plusieurs
+# petits tableaux "Total par type"/"par mutuelle"/"par agence"/"par
+# bureau" (voir `_construire_blocs_recap`). Mêmes filtres optionnels que
+# _BASE_SQL (même alias det/mut/r/b), donc même fonction
+# `_construire_filtres` pour les deux requêtes.
+_RECAP_SQL = _DET_CTE_SQL + """
+    SELECT
+        mut.NOM_MUTUELLE                             AS "Mutuelle",
+        r.LIB_REGION                                 AS "Agence",
+        b.LIBELLE_BUREAU                              AS "Bureau",
+        intitule                                      AS "Intitulé Provision",
+        ROUND(SUM(solde_capital * taux / 100), 2)     AS "Montant Provisions"
+    FROM det
+    LEFT JOIN bureau   b   ON b.code_bureau = det.code_bureau
+    LEFT JOIN region   r   ON r.code_region = b.code_region
+    LEFT JOIN mutuelle mut ON mut.code_mutuelle = r.code_mutuelle
+    WHERE 1 = 1
+      {filtres_optionnels}
+    GROUP BY mut.NOM_MUTUELLE, r.LIB_REGION, b.LIBELLE_BUREAU, intitule
+"""
+
+_COLONNES_RECAP = ["Mutuelle", "Agence", "Bureau", "Intitulé Provision", "Montant Provisions"]
+
 _COLONNES_FINALES = [
     "Intitulé Provision",
     "Taux de Provision",
@@ -164,13 +212,10 @@ _COLONNES_FINALES = [
 ]
 
 
-def get_etat_provisions(filters: EtatProvisionsFilters) -> pd.DataFrame:
-    """Construit et exécute la requête de l'état des provisions à la date
-    d'arrêté choisie."""
-    error = filters.validate()
-    if error:
-        raise ValueError(error)
-
+def _construire_filtres(filters: EtatProvisionsFilters) -> tuple[str, dict]:
+    """Construit la clause WHERE optionnelle (alias det/mut/r communs à
+    _BASE_SQL et _RECAP_SQL) et les paramètres associés — factorisé pour
+    que les deux requêtes restent toujours filtrées de façon identique."""
     params: dict = {
         "date_arrete": dt.datetime.combine(filters.date_arrete, dt.time.min),
     }
@@ -205,12 +250,86 @@ def get_etat_provisions(filters: EtatProvisionsFilters) -> pd.DataFrame:
         filtres_optionnels += " AND det.code_bureau = :code_bureau"
         params["code_bureau"] = filters.code_bureau.strip()
 
+    return filtres_optionnels, params
+
+
+def get_etat_provisions(filters: EtatProvisionsFilters) -> pd.DataFrame:
+    """Construit et exécute la requête de l'état des provisions à la date
+    d'arrêté choisie."""
+    error = filters.validate()
+    if error:
+        raise ValueError(error)
+
+    filtres_optionnels, params = _construire_filtres(filters)
     sql = _BASE_SQL.format(filtres_optionnels=filtres_optionnels)
 
     df = fetch_df(sql, params)
     if df.empty:
         return pd.DataFrame(columns=_COLONNES_FINALES)
     return df[_COLONNES_FINALES]
+
+
+def get_etat_provisions_recap(filters: EtatProvisionsFilters) -> pd.DataFrame:
+    """Résultat plat (une ligne par combinaison mutuelle/agence/bureau/type
+    de provision, avec le montant de provision total) utilisé pour
+    construire la feuille "Récap" de l'export Excel — mêmes filtres que
+    `get_etat_provisions`, agrégation plus simple (pas de ROLLUP)."""
+    error = filters.validate()
+    if error:
+        raise ValueError(error)
+
+    filtres_optionnels, params = _construire_filtres(filters)
+    sql = _RECAP_SQL.format(filtres_optionnels=filtres_optionnels)
+
+    df = fetch_df(sql, params)
+    if df.empty:
+        return pd.DataFrame(columns=_COLONNES_RECAP)
+    return df[_COLONNES_RECAP]
+
+
+def _construire_blocs_recap(recap_df: pd.DataFrame) -> list[tuple[str, pd.DataFrame]]:
+    """
+    Construit les 4 tableaux empilés de la feuille "Récap" à partir du
+    résultat plat de `get_etat_provisions_recap` : un total simple par
+    type de provision, puis par mutuelle, par agence, par bureau — sans
+    tableau croisé entre ces dimensions (choix explicite de
+    l'utilisateur : un récap simple, une ligne par valeur + un total
+    général, pas un tableau croisé type × localisation).
+    """
+    montant_total = float(recap_df["Montant Provisions"].sum()) if not recap_df.empty else 0.0
+
+    def _total_par(colonne: str) -> pd.DataFrame:
+        if recap_df.empty:
+            return pd.DataFrame({colonne: [], "Montant Provisions": []})
+        total = (
+            recap_df.assign(**{colonne: recap_df[colonne].fillna("(Non renseigné)")})
+            .groupby(colonne, as_index=False)["Montant Provisions"]
+            .sum()
+            .sort_values("Montant Provisions", ascending=False)
+        )
+        ligne_totale = pd.DataFrame({colonne: ["TOTAL GÉNÉRAL"], "Montant Provisions": [montant_total]})
+        return pd.concat([total, ligne_totale], ignore_index=True)
+
+    if recap_df.empty:
+        par_type = pd.DataFrame({"Intitulé Provision": [], "Montant Provisions": []})
+    else:
+        ordre = {nom: i for i, nom in enumerate(_INTITULES_PROVISION_DISPONIBLES)}
+        par_type = (
+            recap_df.groupby("Intitulé Provision", as_index=False)["Montant Provisions"].sum()
+        )
+        par_type["_ordre"] = par_type["Intitulé Provision"].map(ordre)
+        par_type = par_type.sort_values("_ordre").drop(columns="_ordre")
+        ligne_totale = pd.DataFrame(
+            {"Intitulé Provision": ["TOTAL GÉNÉRAL"], "Montant Provisions": [montant_total]}
+        )
+        par_type = pd.concat([par_type, ligne_totale], ignore_index=True)
+
+    return [
+        ("TOTAL PAR TYPE DE PROVISION", par_type),
+        ("TOTAL PAR MUTUELLE", _total_par("Mutuelle")),
+        ("TOTAL PAR AGENCE", _total_par("Agence")),
+        ("TOTAL PAR BUREAU", _total_par("Bureau")),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -333,3 +452,27 @@ class EtatProvisionsExtraction(Extraction):
 
     def excel_filename(self, filters: EtatProvisionsFilters) -> str:
         return f"etat_provisions_{filters.date_arrete:%Y%m%d}.xlsx"
+
+    def build_excel_export(self, df: pd.DataFrame, filters: EtatProvisionsFilters) -> BytesIO:
+        """
+        Classeur Excel avec une feuille "Récap" en plus de la feuille de
+        détail habituelle (demande explicite de l'utilisateur, 10/11/2026) :
+        4 petits tableaux empilés (total par type de provision, par
+        mutuelle, par agence, par bureau), construits à partir d'une
+        requête d'agrégation séparée (`get_etat_provisions_recap`, mêmes
+        filtres que le détail) plutôt que recalculés depuis `df`, pour ne
+        pas avoir à exclure/re-séparer les lignes "TOTAL <tranche>" déjà
+        mêlées aux lignes détail dans `df`.
+        """
+        recap_df = get_etat_provisions_recap(filters)
+        blocs = _construire_blocs_recap(recap_df)
+        return build_excel_with_recap(
+            df,
+            recap_blocs=blocs,
+            column_labels=self.column_labels,
+            montant_cols=self.montant_cols,
+            date_cols=self.date_cols,
+            total_cols=self.total_cols,
+            sheet_name=self.label,
+            recap_montant_cols={"Montant Provisions"},
+        )

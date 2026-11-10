@@ -173,6 +173,114 @@ def _write_chunked(
         )
 
 
+def write_recap_sheet(
+    writer,
+    *,
+    sheet_name: str,
+    blocs: list[tuple[str, pd.DataFrame]],
+    montant_cols: set[str],
+) -> None:
+    """
+    Écrit une feuille "récap" empilant plusieurs petits tableaux (un par
+    entrée de `blocs`, dans l'ordre), chacun précédé d'un titre de section
+    en gras et séparé du suivant par une ligne vide — utilisé pour les
+    feuilles de synthèse (ex. "Total par type de provision", "Total par
+    mutuelle"... pour l'État des provisions) plutôt qu'un unique tableau
+    comme `_write_formatted_sheet`.
+
+    Chaque DataFrame de `blocs` doit déjà avoir ses colonnes nommées comme
+    elles doivent apparaître à l'écran (pas de renommage ici, contrairement
+    à `_write_formatted_sheet`/`column_labels`) et peut inclure une
+    dernière ligne de total (dont la première cellule commence par
+    "TOTAL") qui sera mise en évidence automatiquement, comme la ligne
+    TOTAL des autres feuilles.
+    """
+    wb = writer.book
+    ws = wb.create_sheet(sheet_name)
+    writer.sheets[sheet_name] = ws
+    ws.sheet_state = "visible"
+
+    max_cols = max((len(bloc_df.columns) for _, bloc_df in blocs), default=1)
+    largeurs = [0] * max_cols
+    row = 1
+
+    for titre, bloc_df in blocs:
+        titre_cell = ws.cell(row=row, column=1, value=titre)
+        titre_cell.font = Font(bold=True, size=12, color=EN_TETE_FOND)
+        row += 1
+
+        for col_idx, col_name in enumerate(bloc_df.columns, start=1):
+            cell = ws.cell(row=row, column=col_idx, value=col_name)
+            cell.font = EN_TETE_POLICE
+            cell.fill = PatternFill(
+                start_color=EN_TETE_FOND, end_color=EN_TETE_FOND, fill_type="solid"
+            )
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            largeurs[col_idx - 1] = max(largeurs[col_idx - 1], len(str(col_name)))
+        row += 1
+
+        for _, data_row in bloc_df.iterrows():
+            est_total = str(data_row.iloc[0]).upper().startswith("TOTAL")
+            for col_idx, col_name in enumerate(bloc_df.columns, start=1):
+                valeur = data_row[col_name]
+                cell = ws.cell(row=row, column=col_idx, value=valeur)
+                if col_name in montant_cols:
+                    cell.number_format = "#,##0.00"
+                if est_total:
+                    cell.font = TOTAL_POLICE
+                    cell.fill = TOTAL_FOND
+                largeurs[col_idx - 1] = max(largeurs[col_idx - 1], len(str(valeur)))
+            row += 1
+
+        row += 1  # ligne vide avant le bloc suivant
+
+    for col_idx in range(1, max_cols + 1):
+        col_letter = get_column_letter(col_idx)
+        ws.column_dimensions[col_letter].width = min(largeurs[col_idx - 1] + 2, 40)
+
+
+def build_excel_with_recap(
+    df: pd.DataFrame,
+    *,
+    recap_blocs: list[tuple[str, pd.DataFrame]],
+    column_labels: dict[str, str] | None = None,
+    montant_cols: set[str] | None = None,
+    date_cols: set[str] | None = None,
+    total_cols: set[str] | None = None,
+    sheet_name: str = "Extraction",
+    recap_sheet_name: str = "Récap",
+    recap_montant_cols: set[str] | None = None,
+) -> BytesIO:
+    """
+    Comme `build_excel`, mais ajoute une feuille "Récap" (voir
+    `write_recap_sheet`) en première position, avant la feuille de détail
+    habituelle — utilisé quand une extraction a besoin d'une page de
+    synthèse en plus du détail ligne par ligne.
+    """
+    buffer = BytesIO()
+    deja_utilises: set[str] = set()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        write_recap_sheet(
+            writer,
+            sheet_name=recap_sheet_name,
+            blocs=recap_blocs,
+            montant_cols=recap_montant_cols or set(),
+        )
+        _write_chunked(
+            writer,
+            df,
+            base_sheet_name=(sheet_name or "Extraction")[:31],
+            deja_utilises=deja_utilises,
+            column_labels=column_labels or {},
+            montant_cols=montant_cols or set(),
+            date_cols=date_cols or set(),
+            total_cols=total_cols or set(),
+        )
+        writer.book.active = 0  # la feuille Récap est active à l'ouverture
+    buffer.seek(0)
+    return buffer
+
+
 def build_csv(
     df: pd.DataFrame,
     *,
