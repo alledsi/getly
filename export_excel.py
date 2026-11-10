@@ -21,9 +21,9 @@ import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-EN_TETE_FOND = "1F4E78"
+EN_TETE_FOND = "02564A"  # vert ACEP (RGB 2, 86, 74), demandé le 10/11/2026 à la place du bleu
 EN_TETE_POLICE = Font(color="FFFFFF", bold=True)
-TOTAL_FOND = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
+TOTAL_FOND = PatternFill(start_color="D9E6E4", end_color="D9E6E4", fill_type="solid")
 TOTAL_POLICE = Font(bold=True)
 
 # Limite dure d'Excel : 1 048 576 lignes par feuille. On réserve la ligne
