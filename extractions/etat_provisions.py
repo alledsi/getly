@@ -47,6 +47,28 @@ que la requête détail (`_DET_CTE_SQL`, désormais factorisée) et les mêmes
 filtres (`_construire_filtres`), mais avec une agrégation simple (sans
 ROLLUP) par mutuelle/agence/bureau/type de provision — construction des
 4 tableaux empilés côté Python (pandas), pas en SQL.
+
+Colonnes de mouvement de provision ajoutées le 11/11/2026, à la demande
+de l'utilisateur (détail ET feuille "Récap") :
+- **"Provision Comptabilisée au 01/01"** : solde arrêté (table
+  SOLDE_ARRETE) du compte de provision du client (le même "Numero compte"
+  271/272/223 déjà calculé ci-dessus) au 1er janvier de l'année de la
+  date d'arrêté choisie (ex. date d'arrêté en octobre 2025 -> solde au
+  01/01/2025) — c'est le solde d'ouverture de l'exercice, calculé via une
+  CTE intermédiaire `det_montants` (sous-requête corrélée sur
+  SOLDE_ARRETE par NO_COMPTE + CODE_BUREAU + DATE_ARRETE = 1er janvier).
+- **"Reprise Période"** : si le montant de provision calculé (colonne
+  "Montant Provisions") est inférieur à la provision comptabilisée au
+  01/01, l'excédent à reprendre (`provision comptabilisée − provision`) ;
+  sinon 0. Calculée dans une CTE intermédiaire `det_reprise`.
+- **"Provision Finale"** : `provision comptabilisée au 01/01 + Montant
+  Provisions − Reprise Période`, formule donnée telle quelle par
+  l'utilisateur.
+Ces 3 colonnes sont sommées sur les lignes "TOTAL <tranche>" du ROLLUP
+(même principe que "Cap. Déclassé"/"Solde Capital"/"Montant Provisions" :
+ce sont des montants, pas des identifiants arbitraires, donc SUM() et non
+MAX()), et réutilisées (sommées par mutuelle/agence/bureau/type) dans les
+4 tableaux de la feuille "Récap".
 """
 
 from __future__ import annotations
@@ -110,7 +132,7 @@ class EtatProvisionsFilters:
 # deux requêtes restent toujours cohérentes entre elles (même périmètre
 # de lignes, même calcul du taux/intitulé/montant).
 _DET_CTE_SQL = """
-    WITH det AS (
+    WITH det_base AS (
         SELECT
             CASE WHEN eb.DUREE_IMP <  180 THEN 1
                  WHEN eb.DUREE_IMP <  360 THEN 2
@@ -145,6 +167,39 @@ _DET_CTE_SQL = """
           AND NVL(eb.ENCOURS_CAP,0) > 0
           AND eb.DUREE_IMP >= 90
           AND eb.DUREE_IMP <  720
+    ),
+    -- Montant de provision calculé (solde capital x taux) et provision
+    -- déjà comptabilisée au 01/01 de l'année de la date d'arrêté (solde
+    -- arrêté du compte de provision du client, table SOLDE_ARRETE) —
+    -- isolés dans une CTE à part car Oracle interdit de référencer un
+    -- alias du SELECT courant dans ce même SELECT.
+    det_montants AS (
+        SELECT
+            det_base.*,
+            ROUND(det_base.solde_capital * det_base.taux / 100, 2) AS montant_provision,
+            NVL((SELECT sa.SOLDE_CLOTURE
+                 FROM solde_arrete sa
+                 WHERE sa.NO_COMPTE   = det_base.numero_compte
+                   AND sa.CODE_BUREAU = det_base.code_bureau
+                   AND sa.DATE_ARRETE = :date_jan1), 0)             AS provision_comptab_0101
+        FROM det_base
+    ),
+    -- Reprise de la période : excédent de provision comptabilisée par
+    -- rapport au montant de provision recalculé à cette date d'arrêté.
+    det_reprise AS (
+        SELECT
+            det_montants.*,
+            CASE WHEN montant_provision < provision_comptab_0101
+                 THEN provision_comptab_0101 - montant_provision
+                 ELSE 0
+            END AS reprise_periode
+        FROM det_montants
+    ),
+    det AS (
+        SELECT
+            det_reprise.*,
+            provision_comptab_0101 + montant_provision - reprise_periode AS provision_finale
+        FROM det_reprise
     )
 """
 
@@ -160,7 +215,10 @@ _BASE_SQL = _DET_CTE_SQL + """
         ROUND(SUM(cap_declasse), 2)                 AS "Cap. Déclassé",
         ROUND(SUM(solde_capital), 2)                AS "Solde Capital",
         CASE WHEN GROUPING(matricule) = 1 THEN NULL ELSE MAX(duree_retard)  END AS "Durée Retard",
-        ROUND(SUM(solde_capital * taux / 100), 2)   AS "Montant Provisions"
+        ROUND(SUM(montant_provision), 2)            AS "Montant Provisions",
+        ROUND(SUM(provision_comptab_0101), 2)       AS "Provision Comptabilisée au 01/01",
+        ROUND(SUM(reprise_periode), 2)               AS "Reprise Période",
+        ROUND(SUM(provision_finale), 2)              AS "Provision Finale"
     FROM det
     LEFT JOIN bureau   b   ON b.code_bureau = det.code_bureau
     LEFT JOIN region   r   ON r.code_region = b.code_region
@@ -185,7 +243,10 @@ _RECAP_SQL = _DET_CTE_SQL + """
         r.LIB_REGION                                 AS "Agence",
         b.LIBELLE_BUREAU                              AS "Bureau",
         intitule                                      AS "Intitulé Provision",
-        ROUND(SUM(solde_capital * taux / 100), 2)     AS "Montant Provisions"
+        ROUND(SUM(montant_provision), 2)              AS "Montant Provisions",
+        ROUND(SUM(provision_comptab_0101), 2)         AS "Provision Comptabilisée au 01/01",
+        ROUND(SUM(reprise_periode), 2)                 AS "Reprise Période",
+        ROUND(SUM(provision_finale), 2)                AS "Provision Finale"
     FROM det
     LEFT JOIN bureau   b   ON b.code_bureau = det.code_bureau
     LEFT JOIN region   r   ON r.code_region = b.code_region
@@ -195,7 +256,14 @@ _RECAP_SQL = _DET_CTE_SQL + """
     GROUP BY mut.NOM_MUTUELLE, r.LIB_REGION, b.LIBELLE_BUREAU, intitule
 """
 
-_COLONNES_RECAP = ["Mutuelle", "Agence", "Bureau", "Intitulé Provision", "Montant Provisions"]
+_MONTANT_COLS_RECAP = [
+    "Montant Provisions",
+    "Provision Comptabilisée au 01/01",
+    "Reprise Période",
+    "Provision Finale",
+]
+
+_COLONNES_RECAP = ["Mutuelle", "Agence", "Bureau", "Intitulé Provision", *_MONTANT_COLS_RECAP]
 
 _COLONNES_FINALES = [
     "Intitulé Provision",
@@ -209,6 +277,9 @@ _COLONNES_FINALES = [
     "Solde Capital",
     "Durée Retard",
     "Montant Provisions",
+    "Provision Comptabilisée au 01/01",
+    "Reprise Période",
+    "Provision Finale",
 ]
 
 
@@ -218,6 +289,12 @@ def _construire_filtres(filters: EtatProvisionsFilters) -> tuple[str, dict]:
     que les deux requêtes restent toujours filtrées de façon identique."""
     params: dict = {
         "date_arrete": dt.datetime.combine(filters.date_arrete, dt.time.min),
+        # 1er janvier de l'année de la date d'arrêté — utilisé pour
+        # retrouver la provision déjà comptabilisée (solde arrêté du
+        # compte de provision, voir det_montants dans _DET_CTE_SQL).
+        "date_jan1": dt.datetime.combine(
+            dt.date(filters.date_arrete.year, 1, 1), dt.time.min
+        ),
     }
 
     filtres_optionnels = ""
@@ -296,31 +373,40 @@ def _construire_blocs_recap(recap_df: pd.DataFrame) -> list[tuple[str, pd.DataFr
     l'utilisateur : un récap simple, une ligne par valeur + un total
     général, pas un tableau croisé type × localisation).
     """
-    montant_total = float(recap_df["Montant Provisions"].sum()) if not recap_df.empty else 0.0
+    totaux_generaux = (
+        {col: float(recap_df[col].sum()) for col in _MONTANT_COLS_RECAP}
+        if not recap_df.empty
+        else {col: 0.0 for col in _MONTANT_COLS_RECAP}
+    )
 
     def _total_par(colonne: str) -> pd.DataFrame:
         if recap_df.empty:
-            return pd.DataFrame({colonne: [], "Montant Provisions": []})
+            return pd.DataFrame({colonne: [], **{col: [] for col in _MONTANT_COLS_RECAP}})
         total = (
             recap_df.assign(**{colonne: recap_df[colonne].fillna("(Non renseigné)")})
-            .groupby(colonne, as_index=False)["Montant Provisions"]
+            .groupby(colonne, as_index=False)[_MONTANT_COLS_RECAP]
             .sum()
             .sort_values("Montant Provisions", ascending=False)
         )
-        ligne_totale = pd.DataFrame({colonne: ["TOTAL GÉNÉRAL"], "Montant Provisions": [montant_total]})
+        ligne_totale = pd.DataFrame(
+            {colonne: ["TOTAL GÉNÉRAL"], **{col: [totaux_generaux[col]] for col in _MONTANT_COLS_RECAP}}
+        )
         return pd.concat([total, ligne_totale], ignore_index=True)
 
     if recap_df.empty:
-        par_type = pd.DataFrame({"Intitulé Provision": [], "Montant Provisions": []})
+        par_type = pd.DataFrame(
+            {"Intitulé Provision": [], **{col: [] for col in _MONTANT_COLS_RECAP}}
+        )
     else:
         ordre = {nom: i for i, nom in enumerate(_INTITULES_PROVISION_DISPONIBLES)}
-        par_type = (
-            recap_df.groupby("Intitulé Provision", as_index=False)["Montant Provisions"].sum()
-        )
+        par_type = recap_df.groupby("Intitulé Provision", as_index=False)[_MONTANT_COLS_RECAP].sum()
         par_type["_ordre"] = par_type["Intitulé Provision"].map(ordre)
         par_type = par_type.sort_values("_ordre").drop(columns="_ordre")
         ligne_totale = pd.DataFrame(
-            {"Intitulé Provision": ["TOTAL GÉNÉRAL"], "Montant Provisions": [montant_total]}
+            {
+                "Intitulé Provision": ["TOTAL GÉNÉRAL"],
+                **{col: [totaux_generaux[col]] for col in _MONTANT_COLS_RECAP},
+            }
         )
         par_type = pd.concat([par_type, ligne_totale], ignore_index=True)
 
@@ -350,7 +436,15 @@ class EtatProvisionsExtraction(Extraction):
     icon = "🧮"
 
     column_labels = LIBELLES_COLONNES
-    montant_cols = {"Taux de Provision", "Cap. Déclassé", "Solde Capital", "Montant Provisions"}
+    montant_cols = {
+        "Taux de Provision",
+        "Cap. Déclassé",
+        "Solde Capital",
+        "Montant Provisions",
+        "Provision Comptabilisée au 01/01",
+        "Reprise Période",
+        "Provision Finale",
+    }
     date_cols = {"Date Imp", "Date Opp"}
     # Volontairement vide : les lignes "TOTAL <tranche>" (sous-totaux) sont
     # déjà produites par le ROLLUP de la requête SQL elle-même — une ligne
@@ -474,5 +568,5 @@ class EtatProvisionsExtraction(Extraction):
             date_cols=self.date_cols,
             total_cols=self.total_cols,
             sheet_name=self.label,
-            recap_montant_cols={"Montant Provisions"},
+            recap_montant_cols=set(_MONTANT_COLS_RECAP),
         )
