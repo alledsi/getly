@@ -46,7 +46,9 @@ choix explicite de l'utilisateur). Alimentée par une requête séparée
 que la requête détail (`_DET_CTE_SQL`, désormais factorisée) et les mêmes
 filtres (`_construire_filtres`), mais avec une agrégation simple (sans
 ROLLUP) par mutuelle/agence/bureau/type de provision — construction des
-4 tableaux empilés côté Python (pandas), pas en SQL.
+4 tableaux empilés côté Python (pandas), pas en SQL. Chaque tableau
+affiche, dans l'ordre (demande du 11/11/2026) : Cap. Déclassé, Solde
+Capital, puis les colonnes de mouvement de provision ci-dessous.
 
 Colonnes de mouvement de provision ajoutées le 11/11/2026, à la demande
 de l'utilisateur (détail ET feuille "Récap"), puis affinées le même jour
@@ -268,6 +270,8 @@ _RECAP_SQL = _DET_CTE_SQL + """
         r.LIB_REGION                                 AS "Agence",
         b.LIBELLE_BUREAU                              AS "Bureau",
         intitule                                      AS "Intitulé Provision",
+        ROUND(SUM(cap_declasse), 2)                   AS "Cap. Déclassé",
+        ROUND(SUM(solde_capital), 2)                  AS "Solde Capital",
         ROUND(SUM(provision_theorique), 2)            AS "Provision Théorique",
         ROUND(SUM(provision_comptab_0101), 2)         AS "Provision Comptabilisée au 01/01",
         ROUND(SUM(dotation_periode), 2)                AS "Dotations Période",
@@ -283,6 +287,8 @@ _RECAP_SQL = _DET_CTE_SQL + """
 """
 
 _MONTANT_COLS_RECAP = [
+    "Cap. Déclassé",
+    "Solde Capital",
     "Provision Théorique",
     "Provision Comptabilisée au 01/01",
     "Dotations Période",
