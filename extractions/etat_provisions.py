@@ -49,7 +49,11 @@ ROLLUP) par mutuelle/agence/bureau/type de provision — construction des
 4 tableaux empilés côté Python (pandas), pas en SQL.
 
 Colonnes de mouvement de provision ajoutées le 11/11/2026, à la demande
-de l'utilisateur (détail ET feuille "Récap") :
+de l'utilisateur (détail ET feuille "Récap"), puis affinées le même jour
+une fois la vraie décomposition dotation/reprise clarifiée :
+- **"Provision Théorique"** (renommée depuis "Montant Provisions") : le
+  montant de provision recalculé à cette date d'arrêté (solde capital ×
+  taux) — inchangé, seul le libellé de la colonne change.
 - **"Provision Comptabilisée au 01/01"** : solde arrêté (table
   SOLDE_ARRETE) du compte de provision du client (le même "Numero compte"
   271/272/223 déjà calculé ci-dessus) représentant l'ouverture de
@@ -60,18 +64,24 @@ de l'utilisateur (détail ET feuille "Récap") :
   11/11/2026), pas le 1er janvier de la même année — calculé via une CTE
   intermédiaire `det_montants` (sous-requête corrélée sur SOLDE_ARRETE
   par NO_COMPTE + CODE_BUREAU + DATE_ARRETE = 31 décembre précédent).
-- **"Reprise Période"** : si le montant de provision calculé (colonne
-  "Montant Provisions") est inférieur à la provision comptabilisée au
-  01/01, l'excédent à reprendre (`provision comptabilisée − provision`) ;
-  sinon 0. Calculée dans une CTE intermédiaire `det_reprise`.
-- **"Provision Finale"** : `provision comptabilisée au 01/01 + Montant
-  Provisions − Reprise Période`, formule donnée telle quelle par
-  l'utilisateur.
-Ces 3 colonnes sont sommées sur les lignes "TOTAL <tranche>" du ROLLUP
-(même principe que "Cap. Déclassé"/"Solde Capital"/"Montant Provisions" :
-ce sont des montants, pas des identifiants arbitraires, donc SUM() et non
-MAX()), et réutilisées (sommées par mutuelle/agence/bureau/type) dans les
-4 tableaux de la feuille "Récap".
+- **"Dotations Période"** : si "Provision Théorique" est supérieure à
+  "Provision Comptabilisée au 01/01", le complément à doter
+  (`provision théorique − provision comptabilisée`) ; sinon 0.
+- **"Reprise Période"** : si "Provision Théorique" est inférieure à
+  "Provision Comptabilisée au 01/01", l'excédent à reprendre
+  (`provision comptabilisée − provision théorique`) ; sinon 0.
+- **"Provision Finale"** : `Provision Comptabilisée au 01/01 + Dotations
+  Période − Reprise Période` — comme Dotations Période et Reprise
+  Période sont mutuellement exclusives (l'une des deux est toujours 0),
+  cette décomposition redonne mathématiquement "Provision Théorique"
+  (le mouvement comptable dotation/reprise est rendu visible, sans
+  changer le résultat final).
+Ces 4 colonnes (Provision Théorique, Dotations Période, Reprise Période,
+Provision Comptabilisée au 01/01) sont sommées sur les lignes
+"TOTAL <tranche>" du ROLLUP (même principe que "Cap. Déclassé"/"Solde
+Capital" : ce sont des montants, pas des identifiants arbitraires, donc
+SUM() et non MAX()), et réutilisées (sommées par mutuelle/agence/bureau/
+type) dans les 4 tableaux de la feuille "Récap".
 """
 
 from __future__ import annotations
@@ -171,20 +181,21 @@ _DET_CTE_SQL = """
           AND eb.DUREE_IMP >= 90
           AND eb.DUREE_IMP <  720
     ),
-    -- Montant de provision calculé (solde capital x taux) et provision
-    -- déjà comptabilisée au 01/01 de l'année de la date d'arrêté (solde
-    -- arrêté du compte de provision du client, table SOLDE_ARRETE) —
-    -- isolés dans une CTE à part car Oracle interdit de référencer un
-    -- alias du SELECT courant dans ce même SELECT. Dans SOLDE_ARRETE,
-    -- le solde "au 01/01/AAAA" est en réalité enregistré avec
-    -- DATE_ARRETE = 31/12/(AAAA-1) (clôture annuelle de l'exercice
-    -- précédent, qui sert d'ouverture) — confirmé par l'utilisateur le
-    -- 11/11/2026 : :date_ouverture est donc le 31 décembre de l'année
-    -- précédant la date d'arrêté, pas le 1er janvier de la même année.
+    -- Provision théorique (solde capital x taux, recalculée à cette date
+    -- d'arrêté) et provision déjà comptabilisée au 01/01 de l'année de
+    -- la date d'arrêté (solde arrêté du compte de provision du client,
+    -- table SOLDE_ARRETE) — isolées dans une CTE à part car Oracle
+    -- interdit de référencer un alias du SELECT courant dans ce même
+    -- SELECT. Dans SOLDE_ARRETE, le solde "au 01/01/AAAA" est en réalité
+    -- enregistré avec DATE_ARRETE = 31/12/(AAAA-1) (clôture annuelle de
+    -- l'exercice précédent, qui sert d'ouverture) — confirmé par
+    -- l'utilisateur le 11/11/2026 : :date_ouverture est donc le 31
+    -- décembre de l'année précédant la date d'arrêté, pas le 1er janvier
+    -- de la même année.
     det_montants AS (
         SELECT
             det_base.*,
-            ROUND(det_base.solde_capital * det_base.taux / 100, 2) AS montant_provision,
+            ROUND(det_base.solde_capital * det_base.taux / 100, 2) AS provision_theorique,
             NVL((SELECT sa.SOLDE_CLOTURE
                  FROM solde_arrete sa
                  WHERE sa.NO_COMPTE   = det_base.numero_compte
@@ -192,22 +203,27 @@ _DET_CTE_SQL = """
                    AND sa.DATE_ARRETE = :date_ouverture), 0)        AS provision_comptab_0101
         FROM det_base
     ),
-    -- Reprise de la période : excédent de provision comptabilisée par
-    -- rapport au montant de provision recalculé à cette date d'arrêté.
-    det_reprise AS (
+    -- Dotation et reprise de la période, mutuellement exclusives : dotation
+    -- quand la provision théorique dépasse la provision comptabilisée,
+    -- reprise dans le cas inverse (0 pour l'autre dans chaque cas).
+    det_mouvements AS (
         SELECT
             det_montants.*,
-            CASE WHEN montant_provision < provision_comptab_0101
-                 THEN provision_comptab_0101 - montant_provision
+            CASE WHEN provision_theorique > provision_comptab_0101
+                 THEN provision_theorique - provision_comptab_0101
+                 ELSE 0
+            END AS dotation_periode,
+            CASE WHEN provision_theorique < provision_comptab_0101
+                 THEN provision_comptab_0101 - provision_theorique
                  ELSE 0
             END AS reprise_periode
         FROM det_montants
     ),
     det AS (
         SELECT
-            det_reprise.*,
-            provision_comptab_0101 + montant_provision - reprise_periode AS provision_finale
-        FROM det_reprise
+            det_mouvements.*,
+            provision_comptab_0101 + dotation_periode - reprise_periode AS provision_finale
+        FROM det_mouvements
     )
 """
 
@@ -223,8 +239,9 @@ _BASE_SQL = _DET_CTE_SQL + """
         ROUND(SUM(cap_declasse), 2)                 AS "Cap. Déclassé",
         ROUND(SUM(solde_capital), 2)                AS "Solde Capital",
         CASE WHEN GROUPING(matricule) = 1 THEN NULL ELSE MAX(duree_retard)  END AS "Durée Retard",
-        ROUND(SUM(montant_provision), 2)            AS "Montant Provisions",
+        ROUND(SUM(provision_theorique), 2)          AS "Provision Théorique",
         ROUND(SUM(provision_comptab_0101), 2)       AS "Provision Comptabilisée au 01/01",
+        ROUND(SUM(dotation_periode), 2)              AS "Dotations Période",
         ROUND(SUM(reprise_periode), 2)               AS "Reprise Période",
         ROUND(SUM(provision_finale), 2)              AS "Provision Finale"
     FROM det
@@ -251,8 +268,9 @@ _RECAP_SQL = _DET_CTE_SQL + """
         r.LIB_REGION                                 AS "Agence",
         b.LIBELLE_BUREAU                              AS "Bureau",
         intitule                                      AS "Intitulé Provision",
-        ROUND(SUM(montant_provision), 2)              AS "Montant Provisions",
+        ROUND(SUM(provision_theorique), 2)            AS "Provision Théorique",
         ROUND(SUM(provision_comptab_0101), 2)         AS "Provision Comptabilisée au 01/01",
+        ROUND(SUM(dotation_periode), 2)                AS "Dotations Période",
         ROUND(SUM(reprise_periode), 2)                 AS "Reprise Période",
         ROUND(SUM(provision_finale), 2)                AS "Provision Finale"
     FROM det
@@ -265,8 +283,9 @@ _RECAP_SQL = _DET_CTE_SQL + """
 """
 
 _MONTANT_COLS_RECAP = [
-    "Montant Provisions",
+    "Provision Théorique",
     "Provision Comptabilisée au 01/01",
+    "Dotations Période",
     "Reprise Période",
     "Provision Finale",
 ]
@@ -284,8 +303,9 @@ _COLONNES_FINALES = [
     "Cap. Déclassé",
     "Solde Capital",
     "Durée Retard",
-    "Montant Provisions",
+    "Provision Théorique",
     "Provision Comptabilisée au 01/01",
+    "Dotations Période",
     "Reprise Période",
     "Provision Finale",
 ]
@@ -398,7 +418,7 @@ def _construire_blocs_recap(recap_df: pd.DataFrame) -> list[tuple[str, pd.DataFr
             recap_df.assign(**{colonne: recap_df[colonne].fillna("(Non renseigné)")})
             .groupby(colonne, as_index=False)[_MONTANT_COLS_RECAP]
             .sum()
-            .sort_values("Montant Provisions", ascending=False)
+            .sort_values("Provision Théorique", ascending=False)
         )
         ligne_totale = pd.DataFrame(
             {colonne: ["TOTAL GÉNÉRAL"], **{col: [totaux_generaux[col]] for col in _MONTANT_COLS_RECAP}}
@@ -452,8 +472,9 @@ class EtatProvisionsExtraction(Extraction):
         "Taux de Provision",
         "Cap. Déclassé",
         "Solde Capital",
-        "Montant Provisions",
+        "Provision Théorique",
         "Provision Comptabilisée au 01/01",
+        "Dotations Période",
         "Reprise Période",
         "Provision Finale",
     }
