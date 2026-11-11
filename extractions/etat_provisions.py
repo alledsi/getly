@@ -52,11 +52,14 @@ Colonnes de mouvement de provision ajoutées le 11/11/2026, à la demande
 de l'utilisateur (détail ET feuille "Récap") :
 - **"Provision Comptabilisée au 01/01"** : solde arrêté (table
   SOLDE_ARRETE) du compte de provision du client (le même "Numero compte"
-  271/272/223 déjà calculé ci-dessus) au 1er janvier de l'année de la
-  date d'arrêté choisie (ex. date d'arrêté en octobre 2025 -> solde au
-  01/01/2025) — c'est le solde d'ouverture de l'exercice, calculé via une
-  CTE intermédiaire `det_montants` (sous-requête corrélée sur
-  SOLDE_ARRETE par NO_COMPTE + CODE_BUREAU + DATE_ARRETE = 1er janvier).
+  271/272/223 déjà calculé ci-dessus) représentant l'ouverture de
+  l'exercice de la date d'arrêté choisie (ex. date d'arrêté en octobre
+  2025 -> solde "au 01/01/2025"). Dans SOLDE_ARRETE, ce solde d'ouverture
+  est en réalité enregistré avec DATE_ARRETE = 31/12/(année-1) (clôture
+  annuelle de l'exercice précédent, confirmé par l'utilisateur le
+  11/11/2026), pas le 1er janvier de la même année — calculé via une CTE
+  intermédiaire `det_montants` (sous-requête corrélée sur SOLDE_ARRETE
+  par NO_COMPTE + CODE_BUREAU + DATE_ARRETE = 31 décembre précédent).
 - **"Reprise Période"** : si le montant de provision calculé (colonne
   "Montant Provisions") est inférieur à la provision comptabilisée au
   01/01, l'excédent à reprendre (`provision comptabilisée − provision`) ;
@@ -172,7 +175,12 @@ _DET_CTE_SQL = """
     -- déjà comptabilisée au 01/01 de l'année de la date d'arrêté (solde
     -- arrêté du compte de provision du client, table SOLDE_ARRETE) —
     -- isolés dans une CTE à part car Oracle interdit de référencer un
-    -- alias du SELECT courant dans ce même SELECT.
+    -- alias du SELECT courant dans ce même SELECT. Dans SOLDE_ARRETE,
+    -- le solde "au 01/01/AAAA" est en réalité enregistré avec
+    -- DATE_ARRETE = 31/12/(AAAA-1) (clôture annuelle de l'exercice
+    -- précédent, qui sert d'ouverture) — confirmé par l'utilisateur le
+    -- 11/11/2026 : :date_ouverture est donc le 31 décembre de l'année
+    -- précédant la date d'arrêté, pas le 1er janvier de la même année.
     det_montants AS (
         SELECT
             det_base.*,
@@ -181,7 +189,7 @@ _DET_CTE_SQL = """
                  FROM solde_arrete sa
                  WHERE sa.NO_COMPTE   = det_base.numero_compte
                    AND sa.CODE_BUREAU = det_base.code_bureau
-                   AND sa.DATE_ARRETE = :date_jan1), 0)             AS provision_comptab_0101
+                   AND sa.DATE_ARRETE = :date_ouverture), 0)        AS provision_comptab_0101
         FROM det_base
     ),
     -- Reprise de la période : excédent de provision comptabilisée par
@@ -289,11 +297,15 @@ def _construire_filtres(filters: EtatProvisionsFilters) -> tuple[str, dict]:
     que les deux requêtes restent toujours filtrées de façon identique."""
     params: dict = {
         "date_arrete": dt.datetime.combine(filters.date_arrete, dt.time.min),
-        # 1er janvier de l'année de la date d'arrêté — utilisé pour
-        # retrouver la provision déjà comptabilisée (solde arrêté du
-        # compte de provision, voir det_montants dans _DET_CTE_SQL).
-        "date_jan1": dt.datetime.combine(
-            dt.date(filters.date_arrete.year, 1, 1), dt.time.min
+        # Provision comptabilisée "au 01/01" de l'année de la date
+        # d'arrêté — dans SOLDE_ARRETE, ce solde d'ouverture est
+        # enregistré avec DATE_ARRETE = 31/12 de l'année PRÉCÉDENTE
+        # (clôture annuelle, confirmé par l'utilisateur le 11/11/2026),
+        # pas le 1er janvier de la même année. Utilisé pour retrouver la
+        # provision déjà comptabilisée (solde arrêté du compte de
+        # provision, voir det_montants dans _DET_CTE_SQL).
+        "date_ouverture": dt.datetime.combine(
+            dt.date(filters.date_arrete.year - 1, 12, 31), dt.time.min
         ),
     }
 
