@@ -166,8 +166,8 @@ _DET_CTE_SQL = """
                  WHERE c.MATRICULE_CLIENT = eb.MATRICULE_CLIENT
                    AND c.CODE_BUREAU      = eb.CODE_BUREAU
                    AND c.CODE_TYPE_CPT    = CASE WHEN eb.DUREE_IMP < 180 THEN '271'
-                                                 WHEN eb.DUREE_IMP < 360 THEN '272'
-                                                 ELSE '223' END),
+                                                 WHEN eb.DUREE_IMP < 360 THEN '223'
+                                                 ELSE '272' END),
                 p.NO_CPTCDL)                                         AS numero_compte,
             p.DATE_BASCUL_CTX                                        AS date_opp,
             NVL(eb.CAP_BASC,0)                                       AS cap_declasse,
