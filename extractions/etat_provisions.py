@@ -2,8 +2,8 @@
 Extraction : État des provisions.
 
 Classement des encours en souffrance (ENC_BRUT) par tranche de retard
-(3-6 mois / 6-12 mois / 12-24 mois, selon DUREE_IMP en jours : <180,
-<360, >=360), avec le taux de provision associé (40% / 80% / 100%) et le
+(3-6 mois / 6-12 mois / 12-24 mois, selon DUREE_IMP en jours : <181,
+<361, >=361), avec le taux de provision associé (40% / 80% / 100%) et le
 montant de provision calculé (solde capital × taux). Reprend telle quelle
 la requête SQL fournie par l'utilisateur (CTE "det" + agrégation
 ROLLUP) : chaque tranche affiche une ligne par client concerné ET une
@@ -149,14 +149,14 @@ class EtatProvisionsFilters:
 _DET_CTE_SQL = """
     WITH det_base AS (
         SELECT
-            CASE WHEN eb.DUREE_IMP <  180 THEN 1
-                 WHEN eb.DUREE_IMP <  360 THEN 2
+            CASE WHEN eb.DUREE_IMP <  181 THEN 1
+                 WHEN eb.DUREE_IMP <  361 THEN 2
                  ELSE 3 END                                          AS ordre,
-            CASE WHEN eb.DUREE_IMP <  180 THEN 'PROVISION DE 3 A 6 MOIS'
-                 WHEN eb.DUREE_IMP <  360 THEN 'PROVISION DE 6 A 12 MOIS'
+            CASE WHEN eb.DUREE_IMP <  181 THEN 'PROVISION DE 3 A 6 MOIS'
+                 WHEN eb.DUREE_IMP <  361 THEN 'PROVISION DE 6 A 12 MOIS'
                  ELSE 'PROVISION DE 12 A 24 MOIS' END                AS intitule,
-            CASE WHEN eb.DUREE_IMP <  180 THEN 40
-                 WHEN eb.DUREE_IMP <  360 THEN 80
+            CASE WHEN eb.DUREE_IMP <  181 THEN 40
+                 WHEN eb.DUREE_IMP <  361 THEN 80
                  ELSE 100 END                                        AS taux,
             eb.MATRICULE_CLIENT                                      AS matricule,
             TRIM(NVL(cl.PRENOM_CLIENT,'') || ' ' || NVL(cl.RAISON_SOCIALE_CLIENT,'')) AS nom_client,
@@ -165,8 +165,8 @@ _DET_CTE_SQL = """
                  FROM compte c
                  WHERE c.MATRICULE_CLIENT = eb.MATRICULE_CLIENT
                    AND c.CODE_BUREAU      = eb.CODE_BUREAU
-                   AND c.CODE_TYPE_CPT    = CASE WHEN eb.DUREE_IMP < 180 THEN '271'
-                                                 WHEN eb.DUREE_IMP < 360 THEN '223'
+                   AND c.CODE_TYPE_CPT    = CASE WHEN eb.DUREE_IMP < 181 THEN '271'
+                                                 WHEN eb.DUREE_IMP < 361 THEN '223'
                                                  ELSE '272' END),
                 p.NO_CPTCDL)                                         AS numero_compte,
             p.DATE_BASCUL_CTX                                        AS date_opp,
