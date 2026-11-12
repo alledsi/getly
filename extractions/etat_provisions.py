@@ -14,7 +14,10 @@ Champ obligatoire : date d'arrêté (liste déroulante des dates disponibles
 dans ENC_BRUT, la plus récente pré-sélectionnée — comme pour la Balance
 Agée et les classements d'encours). Filtres facultatifs : intitulé(s) de
 provision (choix multiple parmi les 3 tranches), n° de compte, matricule
-client, localisation hiérarchique (Mutuelle -> Agence -> Bureau).
+client, localisation hiérarchique (Mutuelle -> Agence -> Bureau),
+ressources affectées (case à cocher, ajoutée le 12/11/2026 : décochée par
+défaut, elle exclut les prêts dont le type est rattaché à une ressource
+affectée — TYPE_PRET.RESSOURCE_AFF = 'O' — et coché elle les inclut).
 
 Important : les lignes "TOTAL <tranche>" (sous-totaux ROLLUP) font partie
 intégrante du résultat de la requête SQL elle-même, donc AUCUNE colonne
@@ -130,6 +133,11 @@ class EtatProvisionsFilters:
     code_mutuelle: Optional[str] = None
     code_agence: Optional[str] = None
     code_bureau: Optional[str] = None
+    # Case "Inclure les ressources affectées" (ajoutée le 12/11/2026) :
+    # décochée par défaut (False) -> les prêts rattachés à une ressource
+    # affectée (TYPE_PRET.RESSOURCE_AFF = 'O') sont exclus du résultat ;
+    # cochée (True) -> ils sont inclus, aucun filtre supplémentaire.
+    inclure_ressources_affectees: bool = False
 
     def validate(self) -> Optional[str]:
         if not self.date_arrete:
@@ -173,11 +181,13 @@ _DET_CTE_SQL = """
             NVL(eb.CAP_BASC,0)                                       AS cap_declasse,
             NVL(eb.ENCOURS_CAP,0)                                    AS solde_capital,
             eb.DUREE_IMP                                             AS duree_retard,
-            eb.CODE_BUREAU                                           AS code_bureau
+            eb.CODE_BUREAU                                           AS code_bureau,
+            tp.RESSOURCE_AFF                                         AS ressource_affectee
         FROM enc_brut eb
         JOIN pret p     ON p.NO_PRET = eb.NO_PRET AND p.CODE_BUREAU = eb.CODE_BUREAU
         JOIN client cl  ON cl.MATRICULE_CLIENT = eb.MATRICULE_CLIENT
                        AND cl.CODE_BUREAU      = eb.CODE_BUREAU
+        JOIN type_pret tp ON tp.CODE_TYPE_PRET = p.CODE_TYPE_PRET
         WHERE eb.DATE_ARRETE = :date_arrete
           AND NVL(eb.ENCOURS_CAP,0) > 0
           AND eb.DUREE_IMP >= 90
@@ -336,6 +346,16 @@ def _construire_filtres(filters: EtatProvisionsFilters) -> tuple[str, dict]:
     }
 
     filtres_optionnels = ""
+
+    # Ressources affectées (case décochée par défaut) : on exclut les prêts
+    # dont le type est rattaché à une ressource affectée
+    # (TYPE_PRET.RESSOURCE_AFF = 'O', porté par la CTE "det" sous
+    # ressource_affectee). Si la case est cochée, on ne filtre pas et on
+    # les inclut.
+    if not filters.inclure_ressources_affectees:
+        filtres_optionnels += (
+            " AND (det.ressource_affectee IS NULL OR det.ressource_affectee <> 'O')"
+        )
 
     if filters.intitule_provision:
         placeholders = ", ".join(
@@ -552,6 +572,17 @@ class EtatProvisionsExtraction(Extraction):
             with c3:
                 matricule_client = st.text_input("Matricule client", key="ep_matricule_client")
 
+            inclure_ressources_affectees = st.checkbox(
+                "Inclure les ressources affectées",
+                value=False,
+                key="ep_inclure_ressources_affectees",
+                help=(
+                    "Décoché par défaut : les prêts dont le type est rattaché "
+                    "à une ressource affectée sont exclus du résultat. Coché : "
+                    "ils sont inclus."
+                ),
+            )
+
             st.caption("Localisation (Mutuelle → Agence → Bureau)")
             code_mutuelle, code_agence, code_bureau = render_localisation_cascade(
                 ref_localisation_df, key_prefix="ep_"
@@ -572,6 +603,7 @@ class EtatProvisionsExtraction(Extraction):
             code_mutuelle=code_mutuelle or None,
             code_agence=code_agence or None,
             code_bureau=code_bureau or None,
+            inclure_ressources_affectees=inclure_ressources_affectees,
         )
 
         erreur = filters.validate()
