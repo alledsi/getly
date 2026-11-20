@@ -13,6 +13,7 @@ from typing import Optional
 from extractions.base import Extraction
 from extractions.clients_actifs import ClientsActifsExtraction
 from extractions.base_clientele_personnes_morales import BaseClientelePersonnesMoralesExtraction
+from extractions.versements_retraits import VersementsRetraitsExtraction
 from extractions.balance_agee import BalanceAgeeExtraction
 from extractions.etat_provisions import EtatProvisionsExtraction
 from extractions.journal_ecritures import JournalEcrituresExtraction
@@ -61,6 +62,7 @@ EXTRACTIONS: list[Extraction] = [
     PlusPetitsDeposantsExtraction(),
     ClientsActifsExtraction(),
     BaseClientelePersonnesMoralesExtraction(),
+    VersementsRetraitsExtraction(),
     # Ajoute ici les futures extractions, ex. :
     # BalanceComptableExtraction(),
     # GrandLivreExtraction(),
