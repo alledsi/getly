@@ -237,31 +237,6 @@ def render_admin_page(user: dict) -> None:
                         else:
                             st.error(message)
 
-                c_int1, c_int2 = st.columns([3, 1])
-                with c_int1:
-                    nouvel_acces_integrations = st.checkbox(
-                        "🔄 Accès à la partie Intégrations",
-                        value=bool(cible["acces_integrations"]),
-                        key=f"acces_integrations_{cible_id}",
-                        help=(
-                            "Droit individuel, indépendant de la direction : "
-                            "décide qui peut importer des fichiers dans "
-                            "« 🔄 Intégrations »."
-                        ),
-                    )
-                with c_int2:
-                    st.write("")
-                    st.write("")
-                    if st.button("Mettre à jour", key=f"maj_acces_integrations_{cible_id}"):
-                        ok, message = auth.definir_acces_integrations(
-                            cible_id, nouvel_acces_integrations
-                        )
-                        if ok:
-                            _programmer_message("success", message)
-                            st.rerun()
-                        else:
-                            st.error(message)
-
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     nouveau_role_cible = st.selectbox(
@@ -317,6 +292,38 @@ def render_admin_page(user: dict) -> None:
                 if submitted_reset:
                     ok, message = auth.reinitialiser_mot_de_passe(cible_id, nouveau_mdp_reset)
                     (st.success if ok else st.error)(message)
+
+            st.divider()
+            st.caption(
+                "Accès à « 🔄 Intégrations » — droit individuel, modifiable même "
+                "sur ton propre compte (contrairement au rôle, à la direction, au "
+                "statut et à la suppression ci-dessus, désactivés sur soi-même pour "
+                "ne pas se bloquer hors du rôle admin)."
+            )
+            c_int1, c_int2 = st.columns([3, 1])
+            with c_int1:
+                nouvel_acces_integrations = st.checkbox(
+                    "🔄 Accès à la partie Intégrations",
+                    value=bool(cible["acces_integrations"]),
+                    key=f"acces_integrations_{cible_id}",
+                    help=(
+                        "Droit individuel, indépendant de la direction : "
+                        "décide qui peut importer des fichiers dans "
+                        "« 🔄 Intégrations »."
+                    ),
+                )
+            with c_int2:
+                st.write("")
+                st.write("")
+                if st.button("Mettre à jour", key=f"maj_acces_integrations_{cible_id}"):
+                    ok, message = auth.definir_acces_integrations(
+                        cible_id, nouvel_acces_integrations
+                    )
+                    if ok:
+                        _programmer_message("success", message)
+                        st.rerun()
+                    else:
+                        st.error(message)
 
     _render_directions_section(directions_df)
     _render_permissions_section(directions_df)
