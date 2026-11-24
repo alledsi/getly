@@ -42,6 +42,15 @@ aux autres directions, son accès n'est pas stocké dans
 `direction_permissions` (rien à cocher, rien à tenir à jour) : c'est
 `get_visible_item_ids` qui la reconnaît par son nom et renvoie « accès à
 tout ».
+
+L'accès à la partie « 🔄 Intégrations » (ajoutée le 24/11/2026) suit un
+principe différent des rapports/tableaux de bord : ce n'est PAS une
+permission par direction, mais un droit **individuel** par utilisateur
+(colonne `acces_integrations`, voir `definir_acces_integrations` /
+`a_acces_integrations`) — un administrateur choisit explicitement quelle
+personne y a accès, indépendamment de sa direction. Un administrateur et
+un utilisateur rattaché à "Direction Générale" y ont toujours accès,
+comme pour le reste de l'application.
 """
 
 from __future__ import annotations
@@ -149,17 +158,23 @@ def init_db() -> None:
                 actif INTEGER NOT NULL DEFAULT 1,
                 doit_changer_mdp INTEGER NOT NULL DEFAULT 0,
                 direction_id INTEGER REFERENCES directions(id),
+                acces_integrations INTEGER NOT NULL DEFAULT 0,
                 cree_le TEXT NOT NULL
             )
             """
         )
         # Migration : les bases créées avant l'ajout de la colonne
-        # direction_id n'ont pas cette colonne — on l'ajoute si besoin.
+        # direction_id (ou, plus récemment, acces_integrations) n'ont pas
+        # ces colonnes — on les ajoute si besoin.
         colonnes_users = {
             row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()
         }
         if "direction_id" not in colonnes_users:
             conn.execute("ALTER TABLE users ADD COLUMN direction_id INTEGER REFERENCES directions(id)")
+        if "acces_integrations" not in colonnes_users:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN acces_integrations INTEGER NOT NULL DEFAULT 0"
+            )
 
         conn.execute(
             """
@@ -282,6 +297,7 @@ def authentifier(username: str, password: str) -> Optional[dict]:
         "doit_changer_mdp": bool(row["doit_changer_mdp"]),
         "direction_id": row["direction_id"],
         "direction_nom": row["direction_nom"],
+        "acces_integrations": bool(row["acces_integrations"]),
     }
 
 
@@ -314,7 +330,7 @@ def lister_utilisateurs() -> pd.DataFrame:
         df = pd.read_sql_query(
             """
             SELECT u.id, u.username, u.nom_complet, u.direction_id, d.nom AS direction_nom,
-                   u.role, u.actif, u.doit_changer_mdp, u.cree_le
+                   u.role, u.actif, u.doit_changer_mdp, u.acces_integrations, u.cree_le
             FROM users u
             LEFT JOIN directions d ON d.id = u.direction_id
             ORDER BY u.username
@@ -452,6 +468,21 @@ def modifier_direction_utilisateur(user_id: int, direction_id: Optional[int]) ->
     return True, "Direction mise à jour."
 
 
+def definir_acces_integrations(user_id: int, acces: bool) -> tuple[bool, str]:
+    """Accorde ou retire à un utilisateur l'accès individuel à la partie
+    « 🔄 Intégrations » (droit par personne, indépendant de sa direction —
+    voir `a_acces_integrations`)."""
+    with _connect() as conn:
+        cible = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if cible is None:
+            return False, "Utilisateur introuvable."
+        conn.execute(
+            "UPDATE users SET acces_integrations = ? WHERE id = ?",
+            (1 if acces else 0, user_id),
+        )
+    return True, "Accès aux Intégrations mis à jour."
+
+
 # ---------------------------------------------------------------------------
 # Directions et permissions (rapports/tableaux de bord visibles par direction)
 # ---------------------------------------------------------------------------
@@ -582,3 +613,16 @@ def get_visible_item_ids(user: dict, item_type: str) -> Optional[set[str]]:
         return None if item_type == "extraction" else set()
     permissions = obtenir_permissions_direction(direction_id)
     return permissions.get(item_type, set())
+
+
+def a_acces_integrations(user: dict) -> bool:
+    """True si cet utilisateur a accès à la partie « 🔄 Intégrations » :
+    administrateur, « Direction Générale » (accès total, comme pour le
+    reste de l'application), ou droit individuel explicitement accordé
+    (voir `definir_acces_integrations`) — PAS un droit par direction,
+    contrairement aux rapports/tableaux de bord."""
+    if user.get("role") == "admin":
+        return True
+    if user.get("direction_nom") == DIRECTION_GENERALE:
+        return True
+    return bool(user.get("acces_integrations"))

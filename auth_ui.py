@@ -131,6 +131,7 @@ def render_admin_page(user: dict) -> None:
         )
         affichage["actif"] = affichage["actif"].map({1: "Oui", 0: "Non"})
         affichage["doit_changer_mdp"] = affichage["doit_changer_mdp"].map({1: "Oui", 0: "Non"})
+        affichage["acces_integrations"] = affichage["acces_integrations"].map({1: "Oui", 0: "Non"})
         affichage = affichage.rename(
             columns={
                 "username": "Identifiant",
@@ -139,6 +140,7 @@ def render_admin_page(user: dict) -> None:
                 "role": "Rôle",
                 "actif": "Actif",
                 "doit_changer_mdp": "Doit changer son mot de passe",
+                "acces_integrations": "Accès Intégrations",
                 "cree_le": "Créé le",
             }
         )
@@ -228,6 +230,31 @@ def render_admin_page(user: dict) -> None:
                     if st.button("Mettre à jour", key=f"maj_direction_{cible_id}"):
                         ok, message = auth.modifier_direction_utilisateur(
                             cible_id, options_direction[nouvelle_direction_cible_label]
+                        )
+                        if ok:
+                            _programmer_message("success", message)
+                            st.rerun()
+                        else:
+                            st.error(message)
+
+                c_int1, c_int2 = st.columns([3, 1])
+                with c_int1:
+                    nouvel_acces_integrations = st.checkbox(
+                        "🔄 Accès à la partie Intégrations",
+                        value=bool(cible["acces_integrations"]),
+                        key=f"acces_integrations_{cible_id}",
+                        help=(
+                            "Droit individuel, indépendant de la direction : "
+                            "décide qui peut importer des fichiers dans "
+                            "« 🔄 Intégrations »."
+                        ),
+                    )
+                with c_int2:
+                    st.write("")
+                    st.write("")
+                    if st.button("Mettre à jour", key=f"maj_acces_integrations_{cible_id}"):
+                        ok, message = auth.definir_acces_integrations(
+                            cible_id, nouvel_acces_integrations
                         )
                         if ok:
                             _programmer_message("success", message)

@@ -26,6 +26,7 @@ from dashboards import DASHBOARDS, get_dashboard
 from dashboards import components as c
 from dashboards import data as dashboard_data
 from extractions import EXTRACTIONS, get_extraction
+from integrations import INTEGRATIONS, get_integration
 
 st.set_page_config(page_title="Getly", page_icon="📊", layout="wide")
 
@@ -73,6 +74,11 @@ dashboards_visibles = (
     else [d for d in DASHBOARDS if d.id in dashboard_ids_visibles]
 )
 
+# L'accès aux Intégrations est un droit individuel par utilisateur (voir
+# auth.a_acces_integrations), pas une permission par direction comme les
+# rapports/tableaux de bord ci-dessus.
+integrations_visibles = INTEGRATIONS if auth.a_acces_integrations(utilisateur) else []
+
 # ---------------------------------------------------------------------------
 # Barre latérale : identité de l'appli, utilisateur connecté, navigation
 # ---------------------------------------------------------------------------
@@ -93,6 +99,8 @@ with st.sidebar:
     sections = ["📁 Rapports"]
     if dashboards_visibles:
         sections.append("📊 Tableaux de bord")
+    if integrations_visibles:
+        sections.append("🔄 Intégrations")
     sections.append("👤 Mon compte")
     if utilisateur["role"] == "admin":
         sections.append("🛠️ Administration")
@@ -115,6 +123,15 @@ with st.sidebar:
             "Choisir un tableau de bord", list(labels_db.keys()), label_visibility="collapsed"
         )
         dashboard_id = labels_db[choix_db]
+
+    integration_id = None
+    if section == "🔄 Intégrations" and integrations_visibles:
+        st.subheader("Choisir une intégration")
+        labels_int = {f"{i.icon}  {i.label}": i.id for i in integrations_visibles}
+        choix_int = st.radio(
+            "Choisir une intégration", list(labels_int.keys()), label_visibility="collapsed"
+        )
+        integration_id = labels_int[choix_int]
 
 if section == "👤 Mon compte":
     render_account_page(utilisateur)
@@ -192,6 +209,11 @@ if section == "📊 Tableaux de bord":
 
     st.divider()
     dashboard.render(categorie_choisie, date_choisie)
+    st.stop()
+
+if section == "🔄 Intégrations":
+    integration = get_integration(integration_id)
+    integration.render()
     st.stop()
 
 extraction = get_extraction(extraction_id)
